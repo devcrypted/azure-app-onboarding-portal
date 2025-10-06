@@ -17,3 +17,4 @@ venv/
 .terraform
 *.tfvars
 !terraform.tfvars
+*.tfstate*

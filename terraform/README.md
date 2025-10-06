@@ -22,7 +22,7 @@ terraform init
 terraform apply `
   -var "project_name=apponboard" `
   -var "environment=prod" `
-  -var "location=East US"
+   -var "location=Central India"
 ```
 
 ### Important Variables
@@ -33,6 +33,7 @@ terraform apply `
 | `tenant_id` | Azure AD tenant. Leave empty to inherit from default context. | `null` |
 | `project_name` | Short name used in resource naming. | `apponboard` |
 | `environment` | Environment suffix (dev/test/prod). | `prod` |
+| `location` | Azure region for all resources. | `Central India` |
 | `github_owner` | GitHub account or organization. | `devcrypted` |
 | `github_repository` | Repository name (without owner). | `azure-app-onboarding-portal` |
 | `github_branch` | Branch to deploy from. | `main` |
