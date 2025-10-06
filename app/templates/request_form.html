@@ -1,0 +1,676 @@
+{% extends "base.html" %}
+{% from "icons.html" import icon_save, icon_submit, icon_spinner %}
+
+{% block title %}{% if edit_mode %}Edit Request{% else %}New Request{% endif %} - TradeX Platform Onboarding{% endblock
+%}
+
+{% block content %}
+<div x-data="requestFormApp()" x-init="init()" class="container mx-auto py-8 px-4">
+    <div class="max-w-4xl mx-auto space-y-6">
+        <div>
+            <h1 class="text-3xl font-bold tracking-tight">{% if edit_mode %}Edit Onboarding Request{% else %}New
+                Onboarding Request{% endif %}</h1>
+            <p class="text-muted-foreground mt-2">{% if edit_mode %}Update your draft application onboarding request{%
+                else %}Submit a new application onboarding request{% endif %}</p>
+        </div>
+
+        <!-- Alert Messages -->
+        <div x-show="errorMessage" x-cloak
+            class="rounded-lg border-2 border-red-400 bg-red-50 dark:bg-red-950/30 dark:border-red-900 p-5"
+            role="alert">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-6 w-6 text-red-600 dark:text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                            clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3 flex-1">
+                    <h3 class="text-sm font-bold text-red-900 dark:text-red-200 mb-1">Validation Error</h3>
+                    <p class="text-sm text-red-800 dark:text-red-300" x-text="errorMessage"></p>
+                    <p class="text-xs text-red-700 dark:text-red-400 mt-2">Please scroll down and fix the highlighted
+                        fields before submitting.</p>
+                </div>
+                <button @click="errorMessage = ''"
+                    class="ml-2 text-red-600 hover:text-red-800 dark:text-red-400 dark:hover:text-red-200">
+                    <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                            d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <div x-show="successMessage" x-cloak class="rounded-lg border border-green-300 bg-green-50 p-4" role="alert">
+            <div class="flex">
+                <div class="flex-shrink-0">
+                    <svg class="h-5 w-5 text-green-400" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd"
+                            d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                            clip-rule="evenodd" />
+                    </svg>
+                </div>
+                <div class="ml-3">
+                    <p class="text-sm font-medium text-green-800" x-text="successMessage"></p>
+                </div>
+            </div>
+        </div>
+
+        <form @submit.prevent="submitRequest" class="space-y-8">
+            <div class="card">
+                <div class="p-6 space-y-6">
+                    <!-- Application Details -->
+                    <div>
+                        <h2 class="text-xl font-semibold mb-4">Application Details</h2>
+                        <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                            <div class="space-y-2">
+                                <label for="app_slug" class="block text-sm font-medium">App Slug *</label>
+                                <input id="app_slug" type="text" x-model="form.app_slug" required class="input w-full"
+                                    :class="{'border-red-500': validation.app_slug.error, 'border-green-500': validation.app_slug.valid}"
+                                    placeholder="e.g., myapp" minlength="4" maxlength="6" pattern="[a-z0-9]+"
+                                    @input="validateAppSlug()" @blur="checkSlugUniqueness()"
+                                    @change="checkSlugUniqueness()" @keyup.enter="checkSlugUniqueness()"
+                                    @keyup.tab="checkSlugUniqueness()">
+                                <div x-show="validation.app_slug.checking" class="text-xs text-muted-foreground mt-1">
+                                    <span class="inline-flex items-center">
+                                        <svg class="animate-spin h-3 w-3 mr-1" xmlns="http://www.w3.org/2000/svg"
+                                            fill="none" viewBox="0 0 24 24">
+                                            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor"
+                                                stroke-width="4"></circle>
+                                            <path class="opacity-75" fill="currentColor"
+                                                d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z">
+                                            </path>
+                                        </svg>
+                                        Checking availability...
+                                    </span>
+                                </div>
+                                <p x-show="validation.app_slug.error" x-text="validation.app_slug.message"
+                                    class="text-xs text-red-500 mt-1"></p>
+                                <p x-show="validation.app_slug.valid" class="mt-1 text-xs text-green-600">
+                                    <span class="inline-flex items-center gap-1.5">
+                                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                            fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                            <polyline points="20 6 9 17 4 12" stroke-linecap="round"
+                                                stroke-linejoin="round"></polyline>
+                                        </svg>
+                                        <span>Slug is available</span>
+                                    </span>
+                                </p>
+                                <p x-show="!validation.app_slug.error && !validation.app_slug.valid && !validation.app_slug.checking"
+                                    class="text-xs text-muted-foreground mt-1">
+                                    4-6 characters, lowercase letters and numbers only
+                                </p>
+                            </div>
+
+                            <div class="space-y-2">
+                                <label for="app_name" class="block text-sm font-medium">Application Name *</label>
+                                <input id="app_name" type="text" x-model="form.application_name" required minlength="3"
+                                    maxlength="200" class="input w-full"
+                                    :class="{'border-red-500': validation.application_name.error, 'border-green-500': validation.application_name.valid}"
+                                    placeholder="My Application" @input="validateApplicationName()"
+                                    @blur="validateApplicationName()">
+                                <p x-show="validation.application_name.error"
+                                    x-text="validation.application_name.message" class="text-xs text-red-500 mt-1"></p>
+                                <p x-show="validation.application_name.valid" class="mt-1 text-xs text-green-600">
+                                    <span class="inline-flex items-center gap-1.5">
+                                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                            fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                            <polyline points="20 6 9 17 4 12" stroke-linecap="round"
+                                                stroke-linejoin="round"></polyline>
+                                        </svg>
+                                        <span>Valid application name</span>
+                                    </span>
+                                </p>
+                                <p x-show="!validation.application_name.error && !validation.application_name.valid"
+                                    class="text-xs text-muted-foreground mt-1">
+                                    Minimum 3 characters required
+                                </p>
+                            </div>
+
+                            <div class="space-y-2">
+                                <label for="organization" class="block text-sm font-medium">Organization *</label>
+                                <select id="organization" x-model="form.organization" required class="input w-full"
+                                    :class="{'border-red-500': validation.organization.error, 'border-green-500': validation.organization.valid}"
+                                    @change="validateOrganization()">
+                                    <option value="">Select Organization</option>
+                                    <template x-for="org in lookupData.Organization || []" :key="org.id">
+                                        <option :value="org.value" x-text="org.value"></option>
+                                    </template>
+                                </select>
+                                <p x-show="validation.organization.error" x-text="validation.organization.message"
+                                    class="text-xs text-red-500 mt-1"></p>
+                            </div>
+
+                            <div class="space-y-2">
+                                <label for="lob" class="block text-sm font-medium">Line of Business *</label>
+                                <select id="lob" x-model="form.lob" required class="input w-full"
+                                    :class="{'border-red-500': validation.lob.error, 'border-green-500': validation.lob.valid}"
+                                    @change="validateLOB()">
+                                    <option value="">Select LOB</option>
+                                    <template x-for="lob in lookupData.LOB || []" :key="lob.id">
+                                        <option :value="lob.value" x-text="lob.value"></option>
+                                    </template>
+                                </select>
+                                <p x-show="validation.lob.error" x-text="validation.lob.message"
+                                    class="text-xs text-red-500 mt-1"></p>
+                            </div>
+
+                            <div class="space-y-2 md:col-span-2">
+                                <label for="platform" class="block text-sm font-medium">Platform</label>
+                                <input id="platform" type="text" x-model="form.platform" class="input w-full bg-muted"
+                                    value="Azure" readonly disabled>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Environments -->
+            <div class="card">
+                <div class="p-6 space-y-6">
+                    <div class="flex items-center justify-between">
+                        <h2 class="text-xl font-semibold">Environments</h2>
+                    </div>
+
+                    <div class="space-y-4">
+                        <template x-for="(env, index) in form.environments" :key="index">
+                            <div class="rounded-lg border bg-muted/50 p-6 space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-lg font-medium">
+                                        Environment <span x-text="index + 1"></span>
+                                    </h3>
+                                    <button type="button" @click="removeEnvironment(index)"
+                                        x-show="form.environments.length > 1"
+                                        class="text-sm text-red-600 hover:text-red-700 font-medium">
+                                        Remove
+                                    </button>
+                                </div>
+
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="space-y-2">
+                                        <label :for="'env_name_' + index" class="block text-sm font-medium">Environment
+                                            Type *</label>
+                                        <select :id="'env_name_' + index" x-model="env.environment_name" required
+                                            class="input w-full"
+                                            :class="{'border-red-500': validation.environments[index]?.environment_name?.error, 'border-green-500': validation.environments[index]?.environment_name?.valid}"
+                                            @change="validateEnvironments()">
+                                            <option value="">Select Environment</option>
+                                            <template x-for="e in lookupData.Environment || []" :key="e.id">
+                                                <option :value="e.value" x-text="e.value"></option>
+                                            </template>
+                                        </select>
+                                        <p x-show="validation.environments[index]?.environment_name?.error"
+                                            x-text="validation.environments[index]?.environment_name?.message"
+                                            class="text-xs text-red-500 mt-1"></p>
+                                    </div>
+
+                                    <div class="space-y-2">
+                                        <label :for="'region_' + index" class="block text-sm font-medium">Azure Region
+                                            *</label>
+                                        <select :id="'region_' + index" x-model="env.region" required
+                                            class="input w-full"
+                                            :class="{'border-red-500': validation.environments[index]?.region?.error, 'border-green-500': validation.environments[index]?.region?.valid}"
+                                            @change="validateEnvironments()">
+                                            <option value="">Select Region</option>
+                                            <template x-for="region in lookupData.Region || []" :key="region.id">
+                                                <option :value="region.value" x-text="region.value"></option>
+                                            </template>
+                                        </select>
+                                        <p x-show="validation.environments[index]?.region?.error"
+                                            x-text="validation.environments[index]?.region?.message"
+                                            class="text-xs text-red-500 mt-1"></p>
+                                    </div>
+                                </div>
+
+                            </div>
+                        </template>
+
+                        <button type="button" @click="addEnvironment" class="btn btn-muted w-full md:w-auto">
+                            Add Another Environment
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submit Buttons -->
+            <div class="flex flex-col sm:flex-row gap-3 justify-end">
+                <a href="{{ url_for('web.dashboard') }}" class="btn btn-muted text-center">
+                    Cancel
+                </a>
+                <button type="button" @click="submitRequest(true)" :disabled="submitting" class="btn btn-outline"
+                    x-show="!editMode">
+                    <span x-show="!submitting" class="flex items-center gap-2">
+                        {{ icon_save() }} Save as Draft
+                    </span>
+                    <span x-show="submitting" class="flex items-center justify-center gap-2">
+                        {{ icon_spinner() }} Saving...
+                    </span>
+                </button>
+                <button type="button" @click="submitRequest(false)" :disabled="submitting" class="btn btn-primary">
+                    <span x-show="!submitting" class="flex items-center gap-2">
+                        <template x-if="editMode">
+                            {{ icon_save() }}
+                        </template>
+                        <template x-if="!editMode">
+                            {{ icon_submit() }}
+                        </template>
+                        <span x-text="editMode ? 'Update Draft' : 'Submit for Approval'"></span>
+                    </span>
+                    <span x-show="submitting" class="flex items-center justify-center gap-2">
+                        {{ icon_spinner() }}
+                        <span x-text="editMode ? 'Updating...' : 'Submitting...'"></span>
+                    </span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+    function requestFormApp() {
+        return {
+            form: {
+                app_slug: '',
+                application_name: '',
+                organization: '',
+                lob: '',
+                platform: 'Azure',
+                environments: [
+                    { environment_name: '', region: '' }
+                ]
+            },
+            validation: {
+                app_slug: { valid: false, error: false, checking: false, message: '' },
+                application_name: { valid: false, error: false, message: '' },
+                organization: { valid: false, error: false, message: '' },
+                lob: { valid: false, error: false, message: '' },
+                environments: []
+            },
+            lookupData: {},
+            submitting: false,
+            errorMessage: '',
+            successMessage: '',
+            slugCheckTimeout: null,
+            editMode: {{ edit_mode | default(false) | tojson | safe }},
+            requestId: {{ request_id | default(None) | tojson }},
+
+            async init() {
+                console.log('=== Form Initialization ===');
+                console.log('User Email:', '{{ user_email }}');
+                console.log('Is Admin:', JSON.parse('{{ is_admin | tojson | safe }}'));
+                console.log('Edit Mode:', this.editMode);
+
+                await this.loadLookupData();
+                console.log('Lookup Data Loaded:', this.lookupData);
+
+                // If in edit mode, populate form with existing data
+                if (this.editMode) {
+                    const requestData = {{ request_data | default({}) | tojson | safe }};
+                    console.log('Loading existing request data:', requestData);
+                    this.populateForm(requestData);
+                }
+            },
+
+            populateForm(data) {
+        if (!data || !data.id) {
+            console.error('Invalid request data');
+            return;
+        }
+
+        this.requestId = data.id;
+        this.form.app_slug = data.app_slug || '';
+        this.form.application_name = data.application_name || '';
+        this.form.organization = data.organization || '';
+        this.form.lob = data.lob || '';
+        this.form.platform = data.platform || 'Azure';
+
+        // Populate environments
+        if (data.environments && data.environments.length > 0) {
+            this.form.environments = data.environments.map(env => ({
+                environment_name: env.environment_name || '',
+                region: env.region || ''
+            }));
+
+            // Initialize validation states for all environments
+            this.validation.environments = this.form.environments.map(() => ({
+                environment_name: { valid: true, error: false, message: '' },
+                region: { valid: true, error: false, message: '' }
+            }));
+        }
+
+        // Mark slug as valid since it's an existing request
+        this.validation.app_slug.valid = true;
+        this.validation.application_name.valid = true;
+        this.validation.organization.valid = true;
+        this.validation.lob.valid = true;
+
+        console.log('Form populated successfully');
+    },
+
+            async loadLookupData() {
+        try {
+            const response = await fetch('/api/lookup');
+            this.lookupData = await response.json();
+        } catch (error) {
+            console.error('Failed to load lookup data:', error);
+        }
+    },
+
+    validateAppSlug() {
+        const slug = this.form.app_slug.trim();
+
+        // Reset error state, but preserve valid state if already checked
+        this.validation.app_slug.error = false;
+        // Don't reset valid to false - it's set by checkSlugUniqueness()
+        // this.validation.app_slug.valid = false;
+        this.validation.app_slug.message = '';
+
+        // Empty check
+        if (!slug) {
+            this.validation.app_slug.error = true;
+            this.validation.app_slug.valid = false;
+            this.validation.app_slug.message = 'App slug is required';
+            return false;
+        }
+
+        // Convert to lowercase
+        this.form.app_slug = slug.toLowerCase();
+
+        // Length check
+        if (slug.length < 4) {
+            this.validation.app_slug.error = true;
+            this.validation.app_slug.valid = false;
+            this.validation.app_slug.message = 'App slug must be at least 4 characters';
+            return false;
+        }
+
+        if (slug.length > 6) {
+            this.validation.app_slug.error = true;
+            this.validation.app_slug.valid = false;
+            this.validation.app_slug.message = 'App slug must be at most 6 characters';
+            return false;
+        }
+
+        // Pattern check (lowercase alphanumeric only)
+        const pattern = /^[a-z0-9]+$/;
+        if (!pattern.test(slug)) {
+            this.validation.app_slug.error = true;
+            this.validation.app_slug.valid = false;
+            this.validation.app_slug.message = 'App slug can only contain lowercase letters and numbers';
+            return false;
+        }
+
+        return true;
+    },
+
+            async checkSlugUniqueness() {
+        console.log('checkSlugUniqueness() called');
+
+        // Only check if basic validation passes
+        if (!this.validateAppSlug()) {
+            console.log('Basic validation failed, skipping API check');
+            return;
+        }
+
+        const slug = this.form.app_slug.trim();
+        console.log('Slug to check:', slug);
+
+        // Clear any existing timeout
+        if (this.slugCheckTimeout) {
+            clearTimeout(this.slugCheckTimeout);
+        }
+
+        // Debounce the API call
+        this.slugCheckTimeout = setTimeout(async () => {
+            this.validation.app_slug.checking = true;
+
+            try {
+                console.log(`Checking slug uniqueness: ${slug}`);
+                const response = await fetch(`/api/validate/slug/${slug}`);
+                console.log('API Response Status:', response.status);
+
+                if (!response.ok) {
+                    throw new Error(`API returned ${response.status}`);
+                }
+
+                const data = await response.json();
+                console.log('API Response Data:', data);
+
+                if (data.available) {
+                    this.validation.app_slug.valid = true;
+                    this.validation.app_slug.error = false;
+                    console.log('Slug is available');
+                } else {
+                    this.validation.app_slug.error = true;
+                    this.validation.app_slug.valid = false;
+                    this.validation.app_slug.message = data.message || 'This slug is already taken';
+                    console.log('Slug is not available:', data.message);
+                }
+            } catch (error) {
+                console.error('Failed to check slug uniqueness:', error);
+                this.validation.app_slug.error = true;
+                this.validation.app_slug.valid = false;
+                this.validation.app_slug.message = 'Could not verify slug availability. Please try again.';
+            } finally {
+                this.validation.app_slug.checking = false;
+            }
+        }, 500); // 500ms debounce
+    },
+
+    validateApplicationName() {
+        const name = this.form.application_name.trim();
+
+        this.validation.application_name.error = false;
+        this.validation.application_name.valid = false;
+        this.validation.application_name.message = '';
+
+        if (!name) {
+            this.validation.application_name.error = true;
+            this.validation.application_name.message = 'Application name is required';
+            return false;
+        }
+
+        if (name.length < 3) {
+            this.validation.application_name.error = true;
+            this.validation.application_name.message = 'Application name must be at least 3 characters';
+            return false;
+        }
+
+        if (name.length > 200) {
+            this.validation.application_name.error = true;
+            this.validation.application_name.message = 'Application name must be at most 200 characters';
+            return false;
+        }
+
+        this.validation.application_name.valid = true;
+        return true;
+    },
+
+    validateOrganization() {
+        const org = this.form.organization.trim();
+        this.validation.organization.error = false;
+        this.validation.organization.valid = false;
+        this.validation.organization.message = '';
+
+        if (!org) {
+            this.validation.organization.error = true;
+            this.validation.organization.message = 'Organization is required';
+            return false;
+        }
+
+        this.validation.organization.valid = true;
+        return true;
+    },
+
+    validateLOB() {
+        const lob = this.form.lob.trim();
+        this.validation.lob.error = false;
+        this.validation.lob.valid = false;
+        this.validation.lob.message = '';
+
+        if (!lob) {
+            this.validation.lob.error = true;
+            this.validation.lob.message = 'Line of Business is required';
+            return false;
+        }
+
+        this.validation.lob.valid = true;
+        return true;
+    },
+
+    validateEnvironments() {
+        // Initialize validation for all environments if not already done
+        if (this.validation.environments.length !== this.form.environments.length) {
+            this.validation.environments = this.form.environments.map(() => ({
+                environment_name: { valid: false, error: false, message: '' },
+                region: { valid: false, error: false, message: '' }
+            }));
+        }
+
+        let allValid = true;
+
+        this.form.environments.forEach((env, index) => {
+            // Validate environment name
+            if (!env.environment_name || env.environment_name.trim() === '') {
+                this.validation.environments[index].environment_name.error = true;
+                this.validation.environments[index].environment_name.message = 'Environment type is required';
+                this.validation.environments[index].environment_name.valid = false;
+                allValid = false;
+            } else {
+                this.validation.environments[index].environment_name.valid = true;
+                this.validation.environments[index].environment_name.error = false;
+            }
+
+            // Validate region
+            if (!env.region || env.region.trim() === '') {
+                this.validation.environments[index].region.error = true;
+                this.validation.environments[index].region.message = 'Azure region is required';
+                this.validation.environments[index].region.valid = false;
+                allValid = false;
+            } else {
+                this.validation.environments[index].region.valid = true;
+                this.validation.environments[index].region.error = false;
+            }
+        });
+
+        return allValid;
+    },
+
+    addEnvironment() {
+        this.form.environments.push({
+            environment_name: '',
+            region: ''
+        });
+        // Add validation state for the new environment
+        this.validation.environments.push({
+            environment_name: { valid: false, error: false, message: '' },
+            region: { valid: false, error: false, message: '' }
+        });
+    },
+
+    removeEnvironment(index) {
+        this.form.environments.splice(index, 1);
+        // Remove validation state for the removed environment
+        this.validation.environments.splice(index, 1);
+    },
+
+            async submitRequest(saveAsDraft = false) {
+        console.log('=== Starting Form Submission ===');
+        console.log('Save as draft:', saveAsDraft);
+        console.log('BEFORE validateAppSlug - validation.app_slug.valid:', this.validation.app_slug.valid);
+
+        // Validate all fields before submitting
+        const slugValid = this.validateAppSlug();
+
+        console.log('AFTER validateAppSlug - slugValid:', slugValid);
+        console.log('AFTER validateAppSlug - validation.app_slug.valid:', this.validation.app_slug.valid);
+
+        const nameValid = this.validateApplicationName();
+        const orgValid = this.validateOrganization();
+        const lobValid = this.validateLOB();
+        const envsValid = this.validateEnvironments();
+
+        console.log('Validation Results:', {
+            slugValid,
+            nameValid,
+            orgValid,
+            lobValid,
+            envsValid,
+            slugAvailable: this.validation.app_slug.valid,
+            fullSlugValidation: this.validation.app_slug
+        });
+
+        // Build detailed error message
+        const errors = [];
+        if (!slugValid) errors.push('App Slug is invalid');
+        if (!this.validation.app_slug.valid) errors.push('App Slug availability not verified');
+        if (!nameValid) errors.push('Application Name is invalid');
+        if (!orgValid) errors.push('Organization is not selected');
+        if (!lobValid) errors.push('Line of Business is not selected');
+        if (!envsValid) errors.push('One or more environments are incomplete');
+
+        if (!slugValid || !nameValid || !orgValid || !lobValid || !envsValid || !this.validation.app_slug.valid) {
+            this.errorMessage = `Cannot submit: ${errors.join(', ')}`;
+            console.error('Validation failed:', errors);
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+            return;
+        }
+
+        console.log('All validations passed. Proceeding with submission...');
+        this.submitting = true;
+        this.errorMessage = '';
+        this.successMessage = '';
+
+        // Format data before sending
+        const formattedData = {
+            app_slug: this.form.app_slug.trim().toLowerCase(),
+            application_name: this.form.application_name.trim(),
+            organization: this.form.organization.trim(),
+            lob: this.form.lob.trim(),
+            platform: this.form.platform.trim(),
+            save_as_draft: saveAsDraft,
+            environments: this.form.environments.map(env => ({
+                environment_name: env.environment_name.trim(),
+                region: env.region.trim()
+            }))
+        };
+
+        try {
+            // Use PATCH for edit mode, POST for new requests
+            const url = this.editMode ? `/api/requests/${this.requestId}` : '/api/requests';
+            const method = this.editMode ? 'PATCH' : 'POST';
+
+            console.log(`Submitting ${method} request to ${url}`);
+
+            const response = await fetch(url, {
+                method: method,
+                headers: {
+                    'Content-Type': 'application/json',
+                    'X-User-Email': '{{ user_email }}'
+                },
+                body: JSON.stringify(formattedData)
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                const action = this.editMode ? 'updated' : (saveAsDraft ? 'saved as draft' : 'submitted for approval');
+                this.successMessage = `Request ${action} successfully! Redirecting...`;
+                const redirectId = this.editMode ? this.requestId : data.request_id;
+                setTimeout(() => {
+                    window.location.href = '/requests/' + redirectId;
+                }, 1500);
+            } else {
+                this.errorMessage = data.error || `Failed to ${this.editMode ? 'update' : 'submit'} request`;
+            }
+        } catch (error) {
+            this.errorMessage = 'Network error: ' + error.message;
+        } finally {
+            this.submitting = false;
+        }
+    }
+        }
+    }
+</script>
+{% endblock %}

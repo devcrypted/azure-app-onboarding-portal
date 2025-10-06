@@ -1,0 +1,132 @@
+{% extends "base.html" %}
+
+{% block title %}Dashboard - TradeX Platform Onboarding{% endblock %}
+
+{% block content %}
+<div x-data="dashboardApp()" x-init="init()">
+    <div class="space-y-6">
+        <div>
+            <h1 class="text-3xl font-bold tracking-tight">Dashboard</h1>
+            <p class="text-muted-foreground">Welcome back, <strong>{{ user_email }}</strong></p>
+        </div>
+
+        <!-- Stats Cards -->
+        <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
+            <template x-for="(value, key) in stats" :key="key">
+                <div class="card p-6">
+                    <div class="flex flex-row items-center justify-between space-y-0 pb-2">
+                        <h3 class="text-sm font-medium capitalize" x-text="key.replace(/_/g, ' ')"></h3>
+                    </div>
+                    <div class="text-2xl font-bold" x-text="value"></div>
+                </div>
+            </template>
+        </div>
+
+        <!-- Recent Requests -->
+        <div class="card">
+            <div class="flex flex-col space-y-1.5 p-6">
+                <h3 class="text-2xl font-semibold leading-none tracking-tight">Recent Requests</h3>
+            </div>
+            <div class="p-6 pt-0">
+                <div x-show="loading" x-cloak class="flex items-center justify-center p-8">
+                    <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                    <p class="ml-3 text-muted-foreground">Loading requests...</p>
+                </div>
+
+                <div x-show="!loading && requests.length === 0" class="text-center p-8">
+                    <p class="text-muted-foreground">
+                        No requests found. <a href="{{ url_for('web.new_request') }}" class="text-primary hover:underline">Create your first request</a>
+                    </p>
+                </div>
+
+                <div x-show="!loading && requests.length > 0" class="relative w-full overflow-auto">
+                    <table class="w-full caption-bottom text-sm text-left">
+                        <thead class="border-b border-border bg-muted/40">
+                            <tr class="transition-colors">
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">App Code</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Application Name</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Status</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Created</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-border/70">
+                            <template x-for="request in requests.slice(0, 5)" :key="request.id">
+                                <tr class="transition-colors hover:bg-muted/30">
+                                    <td class="p-4 align-middle" x-text="request.app_code"></td>
+                                    <td class="p-4 align-middle" x-text="request.application_name"></td>
+                                    <td class="p-4 align-middle">
+                                        <span class="badge"
+                                              :class="{
+                                                  'bg-yellow-100 text-yellow-800 border-yellow-300': request.status === 'PENDING',
+                                                  'bg-green-100 text-green-800 border-green-300': request.status === 'APPROVED',
+                                                  'bg-red-100 text-red-800 border-red-300': request.status === 'REJECTED',
+                                                  'bg-blue-100 text-blue-800 border-blue-300': request.status === 'COMPLETED'
+                                              }"
+                                              x-text="request.status">
+                                        </span>
+                                    </td>
+                                    <td class="p-4 align-middle" x-text="new Date(request.created_at).toLocaleDateString()"></td>
+                                    <td class="p-4 align-middle">
+                                        <a :href="`/requests/${request.id}`" class="text-primary hover:underline">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div x-show="requests.length > 5" class="mt-4 text-center">
+                    <a href="{{ url_for('web.requests_list') }}" class="text-primary hover:underline">
+                        View all requests →
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+function dashboardApp() {
+    return {
+        stats: {},
+        requests: [],
+        loading: true,
+        
+        async init() {
+            await this.loadStats();
+            await this.loadRequests();
+        },
+        
+        async loadStats() {
+            try {
+                const response = await fetch('/api/stats', {
+                    headers: {
+                        'X-User-Email': '{{ user_email }}'
+                    }
+                });
+                this.stats = await response.json();
+            } catch (error) {
+                console.error('Failed to load stats:', error);
+            }
+        },
+        
+        async loadRequests() {
+            try {
+                const response = await fetch('/api/requests', {
+                    headers: {
+                        'X-User-Email': '{{ user_email }}'
+                    }
+                });
+                const data = await response.json();
+                this.requests = data.requests || [];
+            } catch (error) {
+                console.error('Failed to load requests:', error);
+            } finally {
+                this.loading = false;
+            }
+        }
+    }
+}
+</script>
+{% endblock %}

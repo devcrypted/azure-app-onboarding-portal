@@ -1,0 +1,239 @@
+{% extends "base.html" %}
+
+{% block title %}Admin Panel - TradeX Platform Onboarding{% endblock %}
+
+{% block content %}
+<div class="space-y-6" x-data="adminApp()" x-init="init()">
+    <div>
+        <h1 class="text-3xl font-bold tracking-tight">Admin Panel</h1>
+        <p class="mt-2 text-sm text-muted-foreground">Manage onboarding requests and system configuration</p>
+    </div>
+
+    <!-- Tabs -->
+    <div class="border-b border-border">
+        <nav class="-mb-px flex space-x-8">
+            <button @click="activeTab = 'pending'"
+                :class="activeTab === 'pending' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground'"
+                class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
+                Pending Requests
+                <span x-show="stats.pending > 0"
+                    class="ml-2 bg-primary/10 text-primary py-0.5 px-2 rounded-full text-xs font-medium"
+                    x-text="stats.pending"></span>
+            </button>
+            <button @click="activeTab = 'all'"
+                :class="activeTab === 'all' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground'"
+                class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
+                All Requests
+            </button>
+            <button @click="activeTab = 'audit'"
+                :class="activeTab === 'audit' ? 'border-primary text-primary' : 'border-transparent text-muted-foreground hover:text-foreground hover:border-muted-foreground'"
+                class="whitespace-nowrap py-4 px-1 border-b-2 font-medium text-sm transition-colors">
+                Audit Log
+            </button>
+        </nav>
+    </div>
+
+    <!-- Pending Requests Tab -->
+    <div x-show="activeTab === 'pending'" class="space-y-4">
+        <div class="card">
+            <div class="p-6">
+                <div x-show="loading" class="text-center py-8">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+
+                <div x-show="!loading && pendingRequests.length === 0" class="text-center py-8 text-muted-foreground">
+                    No pending requests
+                </div>
+
+                <div x-show="!loading && pendingRequests.length > 0" class="overflow-x-auto">
+                    <table class="w-full caption-bottom text-sm text-left">
+                        <thead class="border-b border-border bg-muted/40">
+                            <tr>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">ID</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">App Code
+                                </th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">
+                                    Application</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Requested
+                                    By</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Created
+                                </th>
+                                <th class="h-12 px-4 text-right align-middle font-medium text-muted-foreground">Actions
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-border/70">
+                            <template x-for="request in pendingRequests" :key="request.id">
+                                <tr class="transition-colors hover:bg-muted/30">
+                                    <td class="p-4 align-middle text-sm text-muted-foreground" x-text="request.id"></td>
+                                    <td class="p-4 align-middle text-sm font-medium" x-text="request.app_code"></td>
+                                    <td class="p-4 align-middle text-sm" x-text="request.application_name"></td>
+                                    <td class="p-4 align-middle text-sm text-muted-foreground"
+                                        x-text="request.requested_by"></td>
+                                    <td class="p-4 align-middle text-sm text-muted-foreground"
+                                        x-text="new Date(request.created_at).toLocaleDateString()"></td>
+                                    <td class="p-4 align-middle text-sm text-right">
+                                        <a :href="`/requests/${request.id}`"
+                                            class="text-primary hover:underline">Review</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- All Requests Tab -->
+    <div x-show="activeTab === 'all'" class="space-y-4">
+        <div class="card">
+            <div class="p-6">
+                <div x-show="loading" class="text-center py-8">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+
+                <div x-show="!loading" class="overflow-x-auto">
+                    <table class="w-full caption-bottom text-sm text-left">
+                        <thead class="border-b border-border bg-muted/40">
+                            <tr>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">ID</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">App Code
+                                </th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Status
+                                </th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Created
+                                </th>
+                                <th class="h-12 px-4 text-right align-middle font-medium text-muted-foreground">Actions
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-border/70">
+                            <template x-for="request in allRequests" :key="request.id">
+                                <tr class="transition-colors hover:bg-muted/30">
+                                    <td class="p-4 align-middle text-sm text-muted-foreground" x-text="request.id"></td>
+                                    <td class="p-4 align-middle text-sm font-medium" x-text="request.app_code"></td>
+                                    <td class="p-4 align-middle">
+                                        <span class="badge" :class="{
+                                                  'bg-yellow-100 text-yellow-800 border-yellow-300': request.status === 'PENDING',
+                                                  'bg-green-100 text-green-800 border-green-300': request.status === 'APPROVED',
+                                                  'bg-red-100 text-red-800 border-red-300': request.status === 'REJECTED',
+                                                  'bg-blue-100 text-blue-800 border-blue-300': request.status === 'PROVISIONING',
+                                                  'bg-purple-100 text-purple-800 border-purple-300': request.status === 'COMPLETED'
+                                              }" x-text="request.status">
+                                        </span>
+                                    </td>
+                                    <td class="p-4 align-middle text-sm text-muted-foreground"
+                                        x-text="new Date(request.created_at).toLocaleDateString()"></td>
+                                    <td class="p-4 align-middle text-sm text-right">
+                                        <a :href="`/requests/${request.id}`"
+                                            class="text-primary hover:underline">View</a>
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Audit Log Tab -->
+    <div x-show="activeTab === 'audit'" class="space-y-4">
+        <div class="card">
+            <div class="p-6">
+                <div x-show="loadingAudit" class="text-center py-8">
+                    <div class="inline-block animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+                </div>
+
+                <div x-show="!loadingAudit" class="overflow-x-auto">
+                    <table class="w-full caption-bottom text-sm text-left">
+                        <thead class="border-b border-border bg-muted/40">
+                            <tr>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Timestamp
+                                </th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">User</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Type</th>
+                                <th class="h-12 px-4 text-left align-middle font-medium text-muted-foreground">Action
+                                </th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-border/70">
+                            <template x-for="audit in auditLogs" :key="audit.id">
+                                <tr class="transition-colors hover:bg-muted/30">
+                                    <td class="p-4 align-middle text-sm"
+                                        x-text="new Date(audit.timestamp).toLocaleString()"></td>
+                                    <td class="p-4 align-middle text-sm text-muted-foreground"
+                                        x-text="audit.user_email"></td>
+                                    <td class="p-4 align-middle text-sm text-muted-foreground"
+                                        x-text="audit.request_type"></td>
+                                    <td class="p-4 align-middle text-sm text-muted-foreground" x-text="audit.action">
+                                    </td>
+                                </tr>
+                            </template>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function adminApp() {
+        return {
+            activeTab: 'pending',
+            stats: {},
+            pendingRequests: [],
+            allRequests: [],
+            auditLogs: [],
+            loading: true,
+            loadingAudit: false,
+
+            async init() {
+                await this.loadData();
+            },
+
+            async loadData() {
+                this.loading = true;
+                try {
+                    const [statsRes, requestsRes] = await Promise.all([
+                        fetch('/api/stats', { headers: { 'X-User-Email': '{{ user_email }}' } }),
+                        fetch('/api/requests', { headers: { 'X-User-Email': '{{ user_email }}' } })
+                    ]);
+
+                    this.stats = await statsRes.json();
+                    const requestsData = await requestsRes.json();
+                    this.allRequests = requestsData.requests || [];
+                    this.pendingRequests = this.allRequests.filter(r => r.status === 'PENDING');
+                } catch (error) {
+                    console.error('Failed to load data:', error);
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            async loadAuditLog() {
+                this.loadingAudit = true;
+                try {
+                    const response = await fetch('/api/audit?limit=100', {
+                        headers: { 'X-User-Email': '{{ user_email }}' }
+                    });
+                    const data = await response.json();
+                    this.auditLogs = data.audits || [];
+                } catch (error) {
+                    console.error('Failed to load audit log:', error);
+                } finally {
+                    this.loadingAudit = false;
+                }
+            },
+
+            async watchTab() {
+                if (this.activeTab === 'audit' && this.auditLogs.length === 0) {
+                    await this.loadAuditLog();
+                }
+            }
+        };
+    }
+</script>
+{% endblock %}

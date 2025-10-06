@@ -1,0 +1,1713 @@
+{% extends "base.html" %}
+
+{% block title %}Request Details - TradeX Platform Onboarding{% endblock %}
+
+{% block content %}
+<div x-data="requestDetailApp()" x-init="init()" x-cloak>
+    <div class="space-y-6">
+        <!-- Header / Summary -->
+        <div class="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+            <div class="space-y-3">
+                <div class="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                    <a href="{{ url_for('web.requests_list') }}"
+                        class="flex items-center gap-1 text-primary hover:text-primary/80">
+                        <span aria-hidden="true">←</span>
+                        Back to requests
+                    </a>
+                    <span class="hidden sm:block text-border">•</span>
+                    <span>Request #<span x-text="request?.id ?? '—'"></span></span>
+                    <span class="hidden sm:block text-border">•</span>
+                    <span x-show="request" x-text="formatRelative(request?.created_at)"></span>
+                </div>
+
+                <div>
+                    <h1 class="text-3xl font-semibold tracking-tight text-foreground"
+                        x-text="request?.application_name || 'Loading…'"></h1>
+                    <p class="mt-1 text-base text-muted-foreground">
+                        <span class="font-medium" x-text="request?.app_code || ''"></span>
+                        <span x-show="request?.app_slug">&nbsp;•&nbsp;Slug: <span
+                                x-text="request?.app_slug"></span></span>
+                    </p>
+                </div>
+
+                <div class="flex flex-wrap items-center gap-3">
+                    <span class="inline-flex items-center rounded-full px-3 py-1 text-xs font-medium shadow-sm"
+                        :class="statusBadgeClasses(request?.status)">
+                        <span class="mr-2 h-2 w-2 rounded-full" :class="statusIndicatorClasses(request?.status)"></span>
+                        <span x-text="request?.status || 'Status unavailable'"></span>
+                    </span>
+                    <template x-if="request?.current_stage">
+                        <span
+                            class="inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium text-muted-foreground"
+                            :class="stageBadgeClasses(request?.current_stage)">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor"
+                                class="mr-1.5 h-4 w-4">
+                                <path fill-rule="evenodd"
+                                    d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.707a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293A1 1 0 106.293 10.707l2 2a1 1 0 001.414 0l4-4z"
+                                    clip-rule="evenodd" />
+                            </svg>
+                            <span x-text="formatStage(request?.current_stage)"></span>
+                        </span>
+                    </template>
+                </div>
+            </div>
+
+            <div class="grid grid-cols-1 gap-3 text-sm sm:text-right">
+                <div>
+                    <p class="text-muted-foreground">Requested by</p>
+                    <p class="font-medium text-foreground" x-text="request?.requested_by || '—'"></p>
+                </div>
+                <div class="flex flex-col sm:items-end">
+                    <p class="text-muted-foreground">Organization</p>
+                    <p class="font-medium text-foreground" x-text="request?.organization || '—'"></p>
+                </div>
+                <div class="flex flex-col sm:items-end">
+                    <p class="text-muted-foreground">Platform</p>
+                    <p class="font-medium text-foreground" x-text="request?.platform || '—'"></p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loading State -->
+        <div x-show="loading" class="card flex items-center justify-center gap-3 p-6 text-muted-foreground">
+            <div class="h-8 w-8 animate-spin rounded-full border-b-2 border-primary"></div>
+            <span>Loading request…</span>
+        </div>
+
+        <!-- Request Content -->
+        <div x-show="!loading && request" class="space-y-6" x-transition>
+            <!-- Request Information -->
+            <div class="card">
+                <div class="border-b border-border px-4 py-5 sm:px-6">
+                    <h2 class="text-lg font-medium text-foreground">Request Information</h2>
+                    <p class="mt-1 text-sm text-muted-foreground">Key attributes associated with this onboarding
+                        request.</p>
+                </div>
+                <div class="px-4 py-5 sm:p-6">
+                    <dl class="grid gap-4 sm:grid-cols-2">
+                        <div>
+                            <dt class="text-sm font-medium text-muted-foreground">Line of Business</dt>
+                            <dd class="mt-1 text-sm text-foreground" x-text="request?.lob || '—'"></dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-muted-foreground">Onboarding Date</dt>
+                            <dd class="mt-1 text-sm text-foreground"
+                                x-text="formatDate(request?.onboarding_date) || '—'"></dd>
+                        </div>
+                        <div>
+                            <dt class="text-sm font-medium text-muted-foreground">Current Stage</dt>
+                            <dd class="mt-1 text-sm text-foreground" x-text="formatStage(request?.current_stage)"></dd>
+                        </div>
+                        <div x-show="request?.rejection_reason">
+                            <dt class="text-sm font-medium text-muted-foreground">Rejection Reason</dt>
+                            <dd class="mt-1 text-sm text-destructive" x-text="request?.rejection_reason"></dd>
+                        </div>
+                    </dl>
+                </div>
+            </div>
+
+            <!-- Environments -->
+            <div class="card">
+                <div class="border-b border-border px-4 py-5 sm:px-6">
+                    <h2 class="text-lg font-medium text-foreground">Environments</h2>
+                    <p class="mt-1 text-sm text-muted-foreground">Subscription assignments per environment.</p>
+                </div>
+                <div class="px-4 py-5 sm:p-6">
+                    <ul class="divide-y divide-border">
+                        <template x-for="env in (request?.environments || [])" :key="env.id">
+                            <li class="py-4 sm:py-5">
+                                <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                    <div>
+                                        <p class="text-sm font-semibold text-foreground" x-text="env.environment_name">
+                                        </p>
+                                        <p class="text-xs text-muted-foreground">Region: <span
+                                                x-text="env.region"></span></p>
+                                        <p class="text-xs text-muted-foreground" x-show="env.subscription_id">
+                                            Subscription: <span class="font-mono" x-text="env.subscription_id"></span>
+                                        </p>
+                                    </div>
+                                    <span
+                                        class="inline-flex h-fit items-center rounded-full px-3 py-1 text-xs font-medium"
+                                        :class="env.is_assigned ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200' : 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-200'">
+                                        <span class="mr-2 h-1.5 w-1.5 rounded-full"
+                                            :class="env.is_assigned ? 'bg-emerald-500' : 'bg-amber-500'"></span>
+                                        <span x-text="env.is_assigned ? 'Assigned' : 'Pending assignment'"></span>
+                                    </span>
+                                </div>
+                            </li>
+                        </template>
+                    </ul>
+                </div>
+            </div>
+
+            <!-- Request Status -->
+            <div class="card">
+                <div class="border-b border-border px-4 py-5 sm:px-6">
+                    <h2 class="text-lg font-medium text-foreground">Request Status</h2>
+                    <p class="mt-1 text-sm text-muted-foreground">Track each phase from submission to handover. Use
+                        “View details” to open focused audit and timeline insights without disrupting the layout.
+                        <button type="button"
+                            class="ml-2 inline-flex items-center gap-1 text-sm font-semibold text-primary transition hover:text-primary/80"
+                            @click="openActivityLogs">
+                            See activity logs
+                            <svg xmlns="http://www.w3.org/2000/svg" class="h-3.5 w-3.5" viewBox="0 0 20 20"
+                                fill="none" stroke="currentColor" stroke-width="1.6">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M10 4v12" />
+                                <path stroke-linecap="round" stroke-linejoin="round" d="m15 9-5-5-5 5" />
+                            </svg>
+                        </button>
+                    </p>
+                </div>
+                <div class="px-4 py-5 sm:p-6">
+                    <!-- Desktop -->
+                    <div class="hidden sm:block">
+                        <div class="flex flex-wrap items-stretch">
+                            <template x-for="stage in lifecycleStages()" :key="stage.id">
+                                <div class="flex flex-1 items-center">
+                                    <div class="flex w-36 flex-col items-center gap-2 text-center">
+                                        <div class="relative flex h-12 w-12 items-center justify-center rounded-full border-2 transition-all duration-200"
+                                            :class="stageCircleClasses(stage)">
+                                            <template x-if="stage.state === 'in-progress'">
+                                                <span
+                                                    class="absolute inset-0 -z-10 rounded-full bg-sky-400/30 animate-ping"></span>
+                                            </template>
+                                            <span class="relative h-5 w-5"
+                                                x-html="stageIcon(stage.icon || stage.id)"></span>
+                                            <template x-if="stage.state === 'completed'">
+                                                <span
+                                                    class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
+                                                    <svg class="h-2.5 w-2.5" xmlns="http://www.w3.org/2000/svg"
+                                                        viewBox="0 0 20 20" fill="none" stroke="currentColor"
+                                                        stroke-width="2" aria-hidden="true">
+                                                        <polyline points="4 10 8 14 16 6" stroke-linecap="round"
+                                                            stroke-linejoin="round"></polyline>
+                                                    </svg>
+                                                </span>
+                                            </template>
+                                            <template x-if="stage.state === 'skipped'">
+                                                <span
+                                                    class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-white shadow">
+                                                    <svg class="h-2.5 w-2.5" xmlns="http://www.w3.org/2000/svg"
+                                                        viewBox="0 0 20 20" fill="none" stroke="currentColor"
+                                                        stroke-width="1.8" aria-hidden="true">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M5 3v4h4"></path>
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M5 7a7 7 0 107.15-6"></path>
+                                                    </svg>
+                                                </span>
+                                            </template>
+                                            <template x-if="stage.state === 'failed'">
+                                                <span
+                                                    class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-white shadow">
+                                                    <svg class="h-2.5 w-2.5" xmlns="http://www.w3.org/2000/svg"
+                                                        viewBox="0 0 20 20" fill="none" stroke="currentColor"
+                                                        stroke-width="2" aria-hidden="true">
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M10 6v4"></path>
+                                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                                            d="M10 14h.01"></path>
+                                                    </svg>
+                                                </span>
+                                            </template>
+                                        </div>
+                                        <p class="text-xs font-semibold leading-tight" :class="stageLabelClasses(stage)"
+                                            x-text="stage.label"></p>
+                                        <p class="text-[11px] font-medium text-emerald-600"
+                                            x-show="stage.state === 'completed' && stage.completedAt"
+                                            x-text="'Completed ' + formatTimestamp(stage.completedAt)"></p>
+                                        <p class="text-[11px] font-medium text-sky-600"
+                                            x-show="stage.state === 'in-progress'">In progress</p>
+                                        <p class="text-[11px] font-medium text-amber-600"
+                                            x-show="stage.state === 'skipped'">Skipped</p>
+                                        <p class="text-[11px] font-medium text-muted-foreground"
+                                            x-show="stage.state === 'not-started'">Not started</p>
+                                        <p class="text-[11px] font-medium text-rose-600"
+                                            x-show="stage.state === 'failed' && stage.failedAt"
+                                            x-text="'Failed ' + formatTimestamp(stage.failedAt)"></p>
+                                        <!-- <button type="button"
+                                            class="mt-1 text-[11px] font-semibold text-primary transition hover:text-primary/80"
+                                            @click="openStage(stage)">
+                                            View details
+                                        </button> -->
+                                    </div>
+                                    <div x-show="!stage.isLast" class="mx-2 h-0.5 flex-1"
+                                        :class="stageConnectorClasses(stage)"></div>
+                                </div>
+                            </template>
+                        </div>
+                    </div>
+
+                    <!-- Mobile -->
+                    <div class="space-y-3 sm:hidden">
+                        <template x-for="stage in lifecycleStages()" :key="stage.id">
+                            <div class="flex items-center gap-3 rounded-lg border p-3 transition-all duration-200"
+                                :class="stageCardClasses(stage)">
+                                <div class="relative flex h-10 w-10 items-center justify-center rounded-full border-2"
+                                    :class="stageCircleClasses(stage)">
+                                    <template x-if="stage.state === 'in-progress'">
+                                        <span
+                                            class="absolute inset-0 -z-10 rounded-full bg-sky-400/30 animate-ping"></span>
+                                    </template>
+                                    <span class="relative h-5 w-5" x-html="stageIcon(stage.icon || stage.id)"></span>
+                                    <template x-if="stage.state === 'completed'">
+                                        <span
+                                            class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white shadow">
+                                            <svg class="h-2.5 w-2.5" xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"
+                                                aria-hidden="true">
+                                                <polyline points="4 10 8 14 16 6" stroke-linecap="round"
+                                                    stroke-linejoin="round"></polyline>
+                                            </svg>
+                                        </span>
+                                    </template>
+                                    <template x-if="stage.state === 'failed'">
+                                        <span
+                                            class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-rose-500 text-white shadow">
+                                            <svg class="h-2.5 w-2.5" xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"
+                                                aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M10 6v4"></path>
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M10 14h.01">
+                                                </path>
+                                            </svg>
+                                        </span>
+                                    </template>
+                                    <template x-if="stage.state === 'skipped'">
+                                        <span
+                                            class="absolute -bottom-1 -right-1 flex h-4 w-4 items-center justify-center rounded-full bg-amber-500 text-white shadow">
+                                            <svg class="h-2.5 w-2.5" xmlns="http://www.w3.org/2000/svg"
+                                                viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8"
+                                                aria-hidden="true">
+                                                <path stroke-linecap="round" stroke-linejoin="round" d="M5 3v4h4">
+                                                </path>
+                                                <path stroke-linecap="round" stroke-linejoin="round"
+                                                    d="M5 7a7 7 0 107.15-6"></path>
+                                            </svg>
+                                        </span>
+                                    </template>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="text-sm font-semibold" :class="stageLabelClasses(stage)"
+                                        x-text="stage.label"></p>
+                                    <p class="text-xs font-medium text-emerald-600"
+                                        x-show="stage.state === 'completed' && stage.completedAt"
+                                        x-text="'Completed ' + formatTimestamp(stage.completedAt)"></p>
+                                    <p class="text-xs font-medium text-sky-600" x-show="stage.state === 'in-progress'">
+                                        In progress</p>
+                                    <p class="text-xs font-medium text-amber-600" x-show="stage.state === 'skipped'">
+                                        Skipped</p>
+                                    <p class="text-xs font-medium text-muted-foreground"
+                                        x-show="stage.state === 'not-started'">Not started</p>
+                                    <p class="text-xs font-medium text-rose-600"
+                                        x-show="stage.state === 'failed' && stage.failedAt"
+                                        x-text="'Failed ' + formatTimestamp(stage.failedAt)"></p>
+                                    <button type="button"
+                                        class="mt-2 text-xs font-semibold text-primary hover:text-primary/80"
+                                        @click="openStage(stage)">
+                                        View details
+                                    </button>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Stage Details Modal -->
+            <template x-if="stageModalOpen">
+                <div>
+                    <div class="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm" x-transition.opacity
+                        @click="closeStageModal"></div>
+                    <div class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6" x-transition
+                        @keydown.escape.window="closeStageModal" @click.self="closeStageModal">
+                        <div class="relative w-full max-w-xl rounded-xl border border-border bg-background shadow-2xl">
+                            <button type="button"
+                                class="absolute right-3 top-3 text-muted-foreground transition hover:text-foreground"
+                                @click="closeStageModal" aria-label="Close stage details">
+                                <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                            <div class="space-y-4 px-5 py-6" x-show="selectedStage" x-transition>
+                                <div class="flex items-start gap-4">
+                                    <div class="relative flex h-10 w-10 items-center justify-center rounded-full border-2"
+                                        :class="stageCircleClasses(selectedStage)">
+                                        <span class="h-5 w-5"
+                                            x-html="stageIcon(selectedStage.icon || selectedStage.id)"></span>
+                                    </div>
+                                    <div class="flex-1">
+                                        <p class="text-sm font-semibold leading-tight"
+                                            :class="stageLabelClasses(selectedStage)" x-text="selectedStage.label"></p>
+                                        <p class="mt-1 text-sm text-muted-foreground"
+                                            x-text="selectedStage.description"></p>
+                                        <div class="mt-2 flex flex-wrap items-center gap-2">
+                                            <span
+                                                class="inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-semibold"
+                                                :class="stageStatusPillClasses(selectedStage)"
+                                                x-text="formatStageState(selectedStage?.state)"></span>
+                                            <span class="text-[11px] font-medium text-emerald-600"
+                                                x-show="selectedStage.state === 'completed' && selectedStage.completedAt"
+                                                x-text="'Completed ' + formatTimestamp(selectedStage.completedAt)"></span>
+                                            <span class="text-[11px] font-medium text-sky-600"
+                                                x-show="selectedStage.state === 'in-progress'">In progress</span>
+                                            <span class="text-[11px] font-medium text-amber-600"
+                                                x-show="selectedStage.state === 'skipped'">Skipped</span>
+                                            <span class="text-[11px] font-medium text-rose-600"
+                                                x-show="selectedStage.state === 'failed' && selectedStage.failedAt"
+                                                x-text="'Failed ' + formatTimestamp(selectedStage.failedAt)"></span>
+                                        </div>
+                                    </div>
+                                </div>
+                                <div class="space-y-4 text-sm">
+                                    <template x-if="selectedStage && selectedStage.timelineEntries.length">
+                                        <div>
+                                            <p
+                                                class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                                Stage timeline</p>
+                                            <ul class="mt-2 space-y-3">
+                                                <template x-for="entry in selectedStage.timelineEntries"
+                                                    :key="entry.id">
+                                                    <li
+                                                        class="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground dark:bg-muted/10">
+                                                        <p class="font-medium text-foreground"
+                                                            x-text="formatTimestamp(entry.created_at)"></p>
+                                                        <p class="text-sm" x-text="entry.message"></p>
+                                                        <div class="mt-1 text-xs text-muted-foreground/80"
+                                                            x-show="entry.performed_by"
+                                                            x-text="'By ' + entry.performed_by"></div>
+                                                        <div class="text-xs text-muted-foreground/70"
+                                                            x-text="entry.status"></div>
+                                                    </li>
+                                                </template>
+                                            </ul>
+                                        </div>
+                                    </template>
+                                    <template x-if="selectedStage && selectedStage.auditLogs.length">
+                                        <div>
+                                            <p
+                                                class="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                                                Audit log</p>
+                                            <ul class="mt-2 space-y-3">
+                                                <template x-for="log in selectedStage.auditLogs" :key="log.id">
+                                                    <li
+                                                        class="rounded-lg border border-border bg-muted/40 p-3 text-sm text-muted-foreground dark:bg-muted/10">
+                                                        <p class="font-medium text-foreground"
+                                                            x-text="formatTimestamp(log.timestamp)"></p>
+                                                        <p class="text-sm" x-text="log.action"></p>
+                                                        <div class="mt-1 text-xs text-muted-foreground/80"
+                                                            x-text="'By ' + log.user_email"></div>
+                                                    </li>
+                                                </template>
+                                            </ul>
+                                        </div>
+                                    </template>
+                                    <template
+                                        x-if="selectedStage && !selectedStage.timelineEntries.length && !selectedStage.auditLogs.length">
+                                        <p class="text-sm text-muted-foreground">No additional activity recorded for
+                                            this stage yet.</p>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Activity Logs Modal -->
+            <template x-if="activityModalOpen">
+                <div>
+                    <div class="fixed inset-0 z-40 bg-slate-900/60 backdrop-blur-sm" x-transition.opacity
+                        @click="closeActivityLogs"></div>
+                    <div class="fixed inset-0 z-50 flex items-center justify-center px-4 py-6" x-transition
+                        @keydown.escape.window="closeActivityLogs" @click.self="closeActivityLogs">
+                        <div class="relative w-full max-w-3xl rounded-xl border border-border bg-background shadow-2xl">
+                            <button type="button"
+                                class="absolute right-3 top-3 text-muted-foreground transition hover:text-foreground"
+                                @click="closeActivityLogs" aria-label="Close activity logs">
+                                <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                    fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                                </svg>
+                            </button>
+                            <div class="space-y-4 px-5 py-6" x-transition>
+                                <div class="flex flex-wrap items-start justify-between gap-3">
+                                    <div>
+                                        <p class="text-base font-semibold text-foreground">Activity logs</p>
+                                        <p class="text-sm text-muted-foreground">A unified trail of approvals, stage
+                                            progress, audit events, and comments.</p>
+                                    </div>
+                                    <span class="inline-flex items-center rounded-full bg-muted px-2.5 py-1 text-xs font-semibold text-muted-foreground">
+                                        <span class="mr-1 h-1.5 w-1.5 rounded-full bg-primary"></span>
+                                        <span x-text="activityLogEntries.length + ' entries'"></span>
+                                    </span>
+                                </div>
+                                <div class="max-h-[70vh] overflow-y-auto pr-1">
+                                    <template x-if="activityLogEntries.length">
+                                        <ul class="space-y-3">
+                                            <template x-for="entry in activityLogEntries" :key="entry.id">
+                                                <li class="rounded-lg border border-border bg-muted/40 p-4 text-sm text-foreground dark:bg-muted/10">
+                                                    <div class="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+                                                        <div class="space-y-1">
+                                                            <div class="flex flex-wrap items-center gap-2">
+                                                                <span class="inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold"
+                                                                    :class="activityTypeClasses(entry.type)">
+                                                                    <span x-text="entry.type"></span>
+                                                                </span>
+                                                                <p class="text-xs text-muted-foreground"
+                                                                    x-text="formatTimestamp(entry.timestamp)"></p>
+                                                            </div>
+                                                            <p class="font-semibold leading-snug"
+                                                                x-text="entry.title"></p>
+                                                            <p class="text-sm text-muted-foreground"
+                                                                x-text="entry.message"></p>
+                                                        </div>
+                                                        <div class="flex flex-col items-end gap-1 text-xs text-muted-foreground">
+                                                            <span x-text="entry.actor"></span>
+                                                            <template x-if="entry.status">
+                                                                <span class="inline-flex items-center rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+                                                                    <span class="mr-1 h-1.5 w-1.5 rounded-full"
+                                                                        :class="activityStatusDot(entry.status)"></span>
+                                                                    <span x-text="'Status: ' + entry.status"></span>
+                                                                </span>
+                                                            </template>
+                                                        </div>
+                                                    </div>
+                                                </li>
+                                            </template>
+                                        </ul>
+                                    </template>
+                                    <template x-if="!activityLogEntries.length">
+                                        <p class="text-sm text-muted-foreground">No activity recorded for this request
+                                            yet.</p>
+                                    </template>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </template>
+
+            <!-- Requester Actions -->
+            <div x-show="canEditRequest || canSubmitRequest || canAddComment" class="space-y-6">
+                <!-- Submit Draft -->
+                <div x-show="canSubmitRequest" class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Requester Actions &mdash; Submit for Approval
+                        </h2>
+                        <p class="mt-1 text-sm text-muted-foreground">Review your details, then submit when you&apos;re
+                            ready for the admin team to review.</p>
+                    </div>
+                    <div class="space-y-4 px-4 py-5 sm:p-6">
+                        <div
+                            class="rounded-lg border border-dashed border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+                            <p class="font-medium text-foreground">What happens next?</p>
+                            <ul class="mt-2 list-disc space-y-1 pl-5 text-muted-foreground/90">
+                                <li>The request becomes read-only while the approval review is underway.</li>
+                                <li>You&apos;ll receive an email update once an administrator approves or rejects the
+                                    request.</li>
+                            </ul>
+                        </div>
+                        <div class="flex flex-wrap gap-3">
+                            <button @click="submitForApproval" :disabled="processing" class="btn btn-primary">
+                                <span x-show="!processing" class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M4 5l16 7-16 7 4-7-4-7z"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 12l8-4"></path>
+                                    </svg>
+                                    <span>Submit for approval</span>
+                                </span>
+                                <span x-show="processing">Submitting…</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Edit Request -->
+                <div x-show="canEditRequest" class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Edit Request</h2>
+                        <p class="mt-1 text-sm text-muted-foreground">This request is still in draft. You can make
+                            changes before submitting for approval.</p>
+                    </div>
+                    <div class="px-4 py-5 sm:p-6">
+                        <a :href="`/requests/${request?.id}/edit`
+                            class=" btn btn-muted inline-flex items-center gap-2">
+                            <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M16.5 3.5l4 4-11 11H5.5v-4.5z">
+                                </path>
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13 6l5 5"></path>
+                            </svg>
+                            <span>Edit Request Details</span>
+                        </a>
+                    </div>
+                </div>
+
+                <!-- Add Comment -->
+                <div x-show="canAddComment" class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Comments</h2>
+                        <p class="mt-1 text-sm text-muted-foreground">Add notes or questions about this request.</p>
+                    </div>
+                    <div class="space-y-4 px-4 py-5 sm:p-6">
+                        <!-- Existing Comments -->
+                        <div x-show="request?.comments && request.comments.length > 0" class="space-y-3">
+                            <template x-for="comment in (request?.comments || [])" :key="comment.id">
+                                <div class="rounded-lg border border-border bg-muted/20 p-4">
+                                    <div class="flex items-start justify-between gap-3">
+                                        <div class="flex-1">
+                                            <p class="text-sm font-medium text-foreground" x-text="comment.user_email">
+                                            </p>
+                                            <p class="mt-1 text-sm text-muted-foreground" x-text="comment.comment"></p>
+                                        </div>
+                                        <span class="text-xs text-muted-foreground"
+                                            x-text="formatTimestamp(comment.created_at)"></span>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <!-- Add New Comment -->
+                        <div class="space-y-2">
+                            <label class="text-sm font-medium text-foreground">Add a comment</label>
+                            <textarea x-model="newComment" rows="3" class="input w-full"
+                                placeholder="Type your comment here..."></textarea>
+                        </div>
+                        <button @click="addComment" :disabled="processing || !newComment.trim()"
+                            class="btn btn-primary">
+                            <span x-show="!processing" class="inline-flex items-center gap-2">
+                                <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round"
+                                        d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                                </svg>
+                                <span>Post Comment</span>
+                            </span>
+                            <span x-show="processing">Posting…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Admin Actions -->
+            <div class="space-y-6">
+                <!-- Approval -->
+                <div x-show="isAdmin && request && request.status === 'PENDING'" class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Admin Actions &mdash; Approval</h2>
+                        <p class="mt-1 text-sm text-muted-foreground">Approve or reject the request to continue
+                            onboarding.</p>
+                    </div>
+                    <div class="space-y-4 px-4 py-5 sm:p-6">
+                        <div x-show="showRejectReason" class="space-y-2">
+                            <label class="text-sm font-medium text-foreground">Rejection reason</label>
+                            <textarea x-model="rejectionReason" rows="3" class="input w-full"
+                                placeholder="Please provide a reason for rejection..."></textarea>
+                        </div>
+                        <div class="flex flex-wrap gap-3">
+                            <button @click="approveRequest" :disabled="processing" class="btn btn-primary"
+                                data-tone="success">
+                                <span x-show="!processing" class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <polyline points="20 6 9 17 4 12"></polyline>
+                                    </svg>
+                                    <span>Approve</span>
+                                </span>
+                                <span x-show="processing">Processing…</span>
+                            </button>
+                            <button @click="showRejectReason ? rejectRequest() : toggleRejectReason()"
+                                :disabled="processing" class="btn btn-outline" data-tone="danger">
+                                <span x-show="!showRejectReason" class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <line x1="18" y1="6" x2="6" y2="18"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18"></line>
+                                    </svg>
+                                    <span>Reject</span>
+                                </span>
+                                <span x-show="showRejectReason" class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M22 2L11 13"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M22 2l-7 20-4-9-9-4 20-7z"></path>
+                                    </svg>
+                                    <span>Confirm rejection</span>
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Subscription Assignment -->
+                <div x-show="isAdmin && request && request.status === 'APPROVED' && request.current_stage === 'SUBSCRIPTION_ASSIGNMENT'"
+                    class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Admin Actions &mdash; Assign Subscriptions</h2>
+                        <p class="mt-1 text-sm text-muted-foreground">Provide Azure subscription IDs for each
+                            environment to move into infrastructure build-out.</p>
+                    </div>
+                    <div class="space-y-4 px-4 py-5 sm:p-6">
+                        <template x-for="env in (request?.environments || [])" :key="env.id">
+                            <div class="rounded-lg border border-border p-4">
+                                <div class="flex flex-wrap items-center justify-between gap-3">
+                                    <div>
+                                        <h3 class="text-sm font-semibold text-foreground" x-text="env.environment_name">
+                                        </h3>
+                                        <p class="text-xs text-muted-foreground">Region: <span
+                                                x-text="env.region"></span></p>
+                                    </div>
+                                    <span x-show="env.is_assigned"
+                                        class="inline-flex items-center gap-2 rounded-full bg-emerald-50 px-3 py-1 text-xs font-medium text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-200">
+                                        <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                            fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                            <polyline points="20 6 9 17 4 12"></polyline>
+                                        </svg>
+                                        <span>Assigned</span>
+                                    </span>
+                                </div>
+                                <div class="mt-3" x-show="!env.is_assigned">
+                                    <label class="text-xs font-medium text-foreground">Azure Subscription ID</label>
+                                    <input type="text" x-model="subscriptionAssignments[env.id]"
+                                        class="input mt-1 w-full text-sm"
+                                        placeholder="00000000-0000-0000-0000-000000000000">
+                                </div>
+                                <div class="mt-3 rounded bg-muted/40 p-3 text-xs text-muted-foreground"
+                                    x-show="env.is_assigned">
+                                    <p>Subscription ID:</p>
+                                    <p class="font-mono text-foreground" x-text="env.subscription_id"></p>
+                                    <p class="mt-2">Assigned by <span class="font-medium"
+                                            x-text="env.assigned_by"></span> on <span
+                                            x-text="env.assigned_at ? formatTimestamp(env.assigned_at) : '—'"></span>
+                                    </p>
+                                </div>
+                            </div>
+                        </template>
+                        <div class="flex flex-wrap items-center justify-between gap-3 border-t border-border pt-4">
+                            <p class="text-sm text-muted-foreground">
+                                <span x-text="assignedCount"></span> of <span
+                                    x-text="request?.environments?.length || 0"></span> environments assigned
+                            </p>
+                            <button @click="assignSubscriptions"
+                                :disabled="processing || assignedCount === (request?.environments?.length || 0)"
+                                class="btn btn-primary">
+                                <span x-show="!processing" class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M12 17v-6"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M15 14l-3 3-3-3"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round"
+                                            d="M5 10V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v5"></path>
+                                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 19h14"></path>
+                                    </svg>
+                                    <span>Save assignments</span>
+                                </span>
+                                <span x-show="processing">Saving…</span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Foundation Infrastructure -->
+                <div x-show="isAdmin && request && request.current_stage === 'FOUNDATION_INFRA'" class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Admin Actions &mdash; Foundation Infrastructure
+                        </h2>
+                        <p class="mt-1 text-sm text-muted-foreground">Mark the foundation layer complete or flag a
+                            failure.</p>
+                    </div>
+                    <div class="space-y-4 px-4 py-5 sm:p-6">
+                        <div class="flex items-center gap-3 rounded-lg bg-sky-50 p-4 dark:bg-sky-900/20">
+                            <svg class="h-6 w-6 text-sky-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z" />
+                            </svg>
+                            <div>
+                                <p class="text-sm font-medium text-foreground">Foundation infrastructure provisioning
+                                </p>
+                                <p class="text-xs text-muted-foreground">Resource groups, networking, security baselines
+                                </p>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-3">
+                            <button @click="completeFoundationInfra" :disabled="processing" class="btn btn-primary"
+                                data-tone="success">
+                                <span class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <polyline points="20 6 9 17 4 12" stroke-linecap="round"
+                                            stroke-linejoin="round"></polyline>
+                                    </svg>
+                                    <span>Mark foundation complete</span>
+                                </span>
+                            </button>
+                            <button @click="failStage('Foundation infrastructure failed')" :disabled="processing"
+                                class="btn btn-outline" data-tone="danger">
+                                <span class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <line x1="18" y1="6" x2="6" y2="18" stroke-linecap="round"
+                                            stroke-linejoin="round"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18" stroke-linecap="round"
+                                            stroke-linejoin="round"></line>
+                                    </svg>
+                                    <span>Mark as failed</span>
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Application Infrastructure -->
+                <div x-show="isAdmin && request && request.current_stage === 'INFRASTRUCTURE'" class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Admin Actions &mdash; Application Infrastructure
+                        </h2>
+                        <p class="mt-1 text-sm text-muted-foreground">Move the request forward once application
+                            environments are ready.</p>
+                    </div>
+                    <div class="space-y-4 px-4 py-5 sm:p-6">
+                        <div class="flex items-center gap-3 rounded-lg bg-indigo-50 p-4 dark:bg-indigo-900/20">
+                            <svg class="h-6 w-6 text-indigo-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M4 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z" />
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M4 16a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2z" />
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M6 8h.01M10 8h.01M6 18h.01M10 18h.01" />
+                            </svg>
+                            <div>
+                                <p class="text-sm font-medium text-foreground">Application infrastructure provisioning
+                                </p>
+                                <p class="text-xs text-muted-foreground">App services, databases, storage, monitoring
+                                </p>
+                            </div>
+                        </div>
+                        <div class="flex flex-wrap gap-3">
+                            <button @click="completeInfrastructure" :disabled="processing" class="btn btn-primary"
+                                data-tone="success">
+                                <span class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <polyline points="20 6 9 17 4 12" stroke-linecap="round"
+                                            stroke-linejoin="round"></polyline>
+                                    </svg>
+                                    <span>Mark infrastructure complete</span>
+                                </span>
+                            </button>
+                            <button @click="failStage('Application infrastructure failed')" :disabled="processing"
+                                class="btn btn-outline" data-tone="danger">
+                                <span class="inline-flex items-center gap-2">
+                                    <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                        fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                        <line x1="18" y1="6" x2="6" y2="18" stroke-linecap="round"
+                                            stroke-linejoin="round"></line>
+                                        <line x1="6" y1="6" x2="18" y2="18" stroke-linecap="round"
+                                            stroke-linejoin="round"></line>
+                                    </svg>
+                                    <span>Mark as failed</span>
+                                </span>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Handover -->
+                <div x-show="isAdmin && request && request.current_stage === 'HANDOVER' && request.status !== 'COMPLETED'"
+                    class="card">
+                    <div class="border-b border-border px-4 py-5 sm:px-6">
+                        <h2 class="text-lg font-medium text-foreground">Admin Actions &mdash; Handover</h2>
+                        <p class="mt-1 text-sm text-muted-foreground">Finalize onboarding and transition ownership.</p>
+                    </div>
+                    <div class="space-y-4 px-4 py-5 sm:p-6">
+                        <div class="flex items-center gap-3 rounded-lg bg-emerald-50 p-4 dark:bg-emerald-900/20">
+                            <svg class="h-6 w-6 text-emerald-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                                fill="none" stroke="currentColor" stroke-width="1.5">
+                                <path stroke-linecap="round" stroke-linejoin="round"
+                                    d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                            </svg>
+                            <div>
+                                <p class="text-sm font-medium text-foreground">Ready for handover</p>
+                                <p class="text-xs text-muted-foreground">Documentation, access, and training confirmed
+                                </p>
+                            </div>
+                        </div>
+                        <button @click="completeHandover" :disabled="processing" class="btn btn-primary"
+                            data-tone="success">
+                            <span x-show="!processing" class="inline-flex items-center gap-2">
+                                <svg class="h-4 w-4" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none"
+                                    stroke="currentColor" stroke-width="1.5" aria-hidden="true">
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 4h13l-1 4 1 4H4z"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M4 12v8"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M17 16l3 3"></path>
+                                    <path stroke-linecap="round" stroke-linejoin="round" d="M14 21l6-6"></path>
+                                </svg>
+                                <span>Complete onboarding</span>
+                            </span>
+                            <span x-show="processing">Processing…</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Completion Banner -->
+            <div x-show="request && request.status === 'COMPLETED'" class="card bg-emerald-50 dark:bg-emerald-900/20">
+                <div class="flex items-center gap-3 px-4 py-5 sm:p-6">
+                    <svg class="h-12 w-12 text-emerald-500" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"
+                        fill="none" stroke="currentColor" stroke-width="1.5">
+                        <path stroke-linecap="round" stroke-linejoin="round"
+                            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z" />
+                    </svg>
+                    <div>
+                        <h3 class="text-lg font-medium text-emerald-900 dark:text-emerald-100">Onboarding completed</h3>
+                        <p class="text-sm text-emerald-700 dark:text-emerald-200">This application has been successfully
+                            delivered and handed over.</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+    function requestDetailApp() {
+        return {
+            request: null,
+            loading: true,
+            processing: false,
+            isAdmin: false,
+            currentUserEmail: null,
+            showRejectReason: false,
+            rejectionReason: '',
+            newComment: '',
+            subscriptionAssignments: {},
+            stageModalOpen: false,
+            selectedStage: null,
+            activityModalOpen: false,
+            activityLogEntries: [],
+            stageDefinitions: [
+                { id: 'REQUEST_RAISED', label: 'Request raised', description: 'Initial submission recorded and routed to the onboarding queue.', icon: 'document' },
+                { id: 'PENDING_APPROVAL', label: 'Approval review', description: 'Admin review in progress for eligibility and completeness.', icon: 'clock' },
+                { id: 'APPROVED', label: 'Approved', description: 'Approval granted, onboarding preparation underway.', icon: 'shield' },
+                { id: 'SUBSCRIPTION_ASSIGNMENT', label: 'Subscription assignment', description: 'Map required Azure subscriptions to each environment.', icon: 'key' },
+                { id: 'FOUNDATION_INFRA', label: 'Foundation infra', description: 'Provision base landing zones, networking, and security.', icon: 'cube' },
+                { id: 'INFRASTRUCTURE', label: 'Application infra', description: 'Deploy application-specific services and integrations.', icon: 'server' },
+                { id: 'HANDOVER', label: 'Handover', description: 'Transfer ownership, documentation, and access to the customer team.', icon: 'flag' }
+            ],
+
+            get isRequester() {
+                if (!this.request || !this.currentUserEmail) return false;
+                return this.request.requested_by === this.currentUserEmail;
+            },
+
+            get canSubmitRequest() {
+                return (
+                    this.request &&
+                    this.request.status === 'DRAFT' &&
+                    this.isRequester
+                );
+            },
+
+            get canEditRequest() {
+                return (
+                    this.request &&
+                    this.request.status === 'DRAFT' &&
+                    this.request.is_editable &&
+                    this.isRequester
+                );
+            },
+
+            get canAddComment() {
+                return this.request && (this.isRequester || this.isAdmin);
+            },
+
+            get assignedCount() {
+                if (!this.request || !this.request.environments) return 0;
+                return this.request.environments.filter(env => env.is_assigned).length;
+            },
+
+            async init() {
+                this.currentUserEmail = JSON.parse('{{ user_email | tojson | safe }}');
+                await this.loadRequest();
+                this.checkAdminStatus();
+                this.initSubscriptionAssignments();
+            },
+
+            async loadRequest() {
+                try {
+                    const requestId = JSON.parse('{{ request_id | tojson | safe }}');
+                    const response = await fetch(`/api/requests/${requestId}`, {
+                        headers: { 'X-User-Email': '{{ user_email }}' }
+                    });
+                    if (response.ok) {
+                        this.request = await response.json();
+                        this.refreshSelectedStage();
+                        this.refreshActivityLogs();
+                    } else {
+                        console.error('Failed to load request');
+                    }
+                } catch (error) {
+                    console.error('Failed to load request:', error);
+                } finally {
+                    this.loading = false;
+                }
+            },
+
+            checkAdminStatus() {
+                this.isAdmin = JSON.parse('{{ is_user_admin | tojson | safe }}');
+            },
+
+            initSubscriptionAssignments() {
+                if (!this.request || !this.request.environments) return;
+                this.subscriptionAssignments = {};
+                this.request.environments.forEach(env => {
+                    if (!env.is_assigned) {
+                        this.subscriptionAssignments[env.id] = '';
+                    }
+                });
+            },
+
+            openStage(stage) {
+                const resolved = this.getStageById(stage.id);
+                this.selectedStage = resolved || stage;
+                this.stageModalOpen = true;
+                if (typeof document !== 'undefined') {
+                    document.body.classList.add('overflow-hidden');
+                }
+            },
+
+            closeStageModal() {
+                this.stageModalOpen = false;
+                this.selectedStage = null;
+                if (typeof document !== 'undefined') {
+                    document.body.classList.remove('overflow-hidden');
+                }
+            },
+
+            openActivityLogs() {
+                this.refreshActivityLogs();
+                this.activityModalOpen = true;
+                if (typeof document !== 'undefined') {
+                    document.body.classList.add('overflow-hidden');
+                }
+            },
+
+            closeActivityLogs() {
+                this.activityModalOpen = false;
+                if (typeof document !== 'undefined') {
+                    document.body.classList.remove('overflow-hidden');
+                }
+            },
+
+            refreshActivityLogs() {
+                this.activityLogEntries = this.aggregateActivityLogs();
+            },
+
+            aggregateActivityLogs() {
+                if (!this.request) return [];
+
+                const entries = [];
+                const timeline = Array.isArray(this.request.timeline) ? this.request.timeline : [];
+                const audits = Array.isArray(this.request.audit_logs) ? this.request.audit_logs : [];
+                const comments = Array.isArray(this.request.comments) ? this.request.comments : [];
+
+                timeline.forEach(event => {
+                    entries.push({
+                        id: `timeline-${event.id}`,
+                        type: 'Timeline',
+                        title: this.formatStage(event.stage) || 'Stage update',
+                        message: event.message || 'Stage progress updated.',
+                        actor: event.performed_by || 'System',
+                        timestamp: event.created_at,
+                        status: event.status ? event.status.toUpperCase() : null
+                    });
+                });
+
+                audits.forEach(log => {
+                    entries.push({
+                        id: `audit-${log.id}`,
+                        type: 'Audit',
+                        title: log.action || log.request_type || 'Audit event',
+                        message: log.details || '',
+                        actor: log.user_email || 'Unknown user',
+                        timestamp: log.timestamp,
+                        status: null
+                    });
+                });
+
+                comments.forEach(comment => {
+                    const type = comment.is_internal ? 'Internal comment' : 'Comment';
+                    entries.push({
+                        id: `comment-${comment.id}`,
+                        type,
+                        title: comment.is_internal ? 'Internal comment added' : 'Comment added',
+                        message: comment.comment || '',
+                        actor: comment.user_email || 'Unknown user',
+                        timestamp: comment.created_at,
+                        status: null
+                    });
+                });
+
+                return entries
+                    .filter(entry => entry.timestamp)
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            },
+
+            activityTypeClasses(type) {
+                const base = 'bg-muted text-muted-foreground';
+                const variants = {
+                    'Timeline': 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-200',
+                    'Audit': 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-200',
+                    'Comment': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200',
+                    'Internal comment': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200'
+                };
+                return variants[type] || base;
+            },
+
+            activityStatusDot(status) {
+                const normalized = status ? status.toUpperCase() : '';
+                const variants = {
+                    'COMPLETED': 'bg-emerald-500',
+                    'IN_PROGRESS': 'bg-sky-500',
+                    'FAILED': 'bg-rose-500',
+                    'REJECTED': 'bg-rose-500',
+                    'SKIPPED': 'bg-amber-500',
+                    'PENDING': 'bg-amber-400'
+                };
+                return variants[normalized] || 'bg-muted-foreground/50';
+            },
+
+            refreshSelectedStage() {
+                if (!this.stageModalOpen || !this.selectedStage) return;
+                const updated = this.getStageById(this.selectedStage.id);
+                if (updated) {
+                    this.selectedStage = updated;
+                }
+            },
+
+            toggleRejectReason() {
+                this.showRejectReason = !this.showRejectReason;
+            },
+
+            async submitForApproval() {
+                if (!this.request) return;
+
+                const result = await showConfirm({
+                    title: 'Submit for Approval?',
+                    text: 'You will not be able to edit while it is under review.',
+                    icon: 'question',
+                    confirmButtonText: 'Yes, Submit',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed) return;
+
+                this.processing = true;
+                try {
+                    const response = await fetch(`/api/requests/${this.request.id}/submit`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-User-Email': '{{ user_email }}'
+                        }
+                    });
+
+                    const data = await response.json();
+                    if (response.ok) {
+                        await this.loadRequest();
+                        showSuccess(data.message || 'Request submitted for approval');
+                    } else {
+                        showError(data.error || 'Unknown error', 'Submission Failed');
+                    }
+                } catch (error) {
+                    showError(error.message, 'Network Error');
+                } finally {
+                    this.processing = false;
+                }
+            },
+
+            async addComment() {
+                if (!this.request || !this.newComment.trim()) return;
+
+                this.processing = true;
+                try {
+                    const response = await fetch(`/api/requests/${this.request.id}/comments`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-User-Email': '{{ user_email }}'
+                        },
+                        body: JSON.stringify({ comment: this.newComment.trim() })
+                    });
+
+                    const data = await response.json();
+                    if (response.ok) {
+                        this.newComment = '';
+                        await this.loadRequest();
+                        showSuccess('Your comment has been added successfully');
+                    } else {
+                        showError(data.error || 'Unknown error', 'Failed to add comment');
+                    }
+                } catch (error) {
+                    showError(error.message, 'Network Error');
+                } finally {
+                    this.processing = false;
+                }
+            },
+
+            async approveRequest() {
+                const result = await showConfirm({
+                    title: 'Approve Request?',
+                    text: 'This will approve the request and move it to the next stage.',
+                    icon: 'question',
+                    confirmButtonText: 'Yes, Approve',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed) return;
+
+                this.processing = true;
+                try {
+                    const response = await fetch(`/api/requests/${this.request.id}/approve`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-User-Email': '{{ user_email }}'
+                        },
+                        body: JSON.stringify({ approved: true })
+                    });
+                    if (response.ok) {
+                        await this.loadRequest();
+                        showSuccess('Request has been approved successfully');
+                    } else {
+                        const data = await response.json();
+                        showError(data.error || 'Unknown error', 'Approval Failed');
+                    }
+                } catch (error) {
+                    showError(error.message, 'Network Error');
+                } finally {
+                    this.processing = false;
+                }
+            },
+
+            async rejectRequest() {
+                if (!this.rejectionReason) {
+                    showWarning('Please provide a rejection reason');
+                    return;
+                }
+
+                const result = await showConfirm({
+                    title: 'Reject Request?',
+                    text: 'This action cannot be undone. The requester will be notified.',
+                    icon: 'warning',
+                    confirmButtonText: 'Yes, Reject',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed) return;
+
+                this.processing = true;
+                try {
+                    const response = await fetch(`/api/requests/${this.request.id}/approve`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-User-Email': '{{ user_email }}'
+                        },
+                        body: JSON.stringify({ approved: false, rejection_reason: this.rejectionReason })
+                    });
+                    if (response.ok) {
+                        await this.loadRequest();
+                        showSuccess('Request has been rejected');
+                        this.showRejectReason = false;
+                        this.rejectionReason = '';
+                    } else {
+                        const data = await response.json();
+                        showError(data.error || 'Unknown error', 'Rejection Failed');
+                    }
+                } catch (error) {
+                    showError(error.message, 'Network Error');
+                } finally {
+                    this.processing = false;
+                }
+            },
+
+            async assignSubscriptions() {
+                const assignments = [];
+                let hasErrors = false;
+                let errorMessage = '';
+
+                this.request.environments.forEach(env => {
+                    if (!env.is_assigned) {
+                        const subId = this.subscriptionAssignments[env.id];
+                        if (!subId || !subId.trim()) {
+                            errorMessage = `Please provide a subscription ID for ${env.environment_name}`;
+                            hasErrors = true;
+                            return;
+                        }
+                        assignments.push({ env_id: env.id, subscription_id: subId.trim() });
+                    }
+                });
+
+                if (hasErrors) {
+                    showWarning(errorMessage);
+                    return;
+                }
+
+                if (assignments.length === 0) return;
+
+                const result = await showConfirm({
+                    title: 'Assign Subscriptions?',
+                    text: `Assign ${assignments.length} subscription(s) to environments?`,
+                    icon: 'question',
+                    confirmButtonText: 'Yes, Assign',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed) return;
+
+                this.processing = true;
+                try {
+                    const response = await fetch(`/api/requests/${this.request.id}/assign-subscriptions`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-User-Email': '{{ user_email }}'
+                        },
+                        body: JSON.stringify({ assignments })
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        await this.loadRequest();
+                        showSuccess(data.message || 'Subscriptions assigned successfully');
+                        this.initSubscriptionAssignments();
+                    } else {
+                        const data = await response.json();
+                        showError(data.error || 'Unknown error', 'Assignment Failed');
+                    }
+                } catch (error) {
+                    showError(error.message, 'Network Error');
+                } finally {
+                    this.processing = false;
+                }
+            },
+
+            async completeFoundationInfra() {
+                const result = await showConfirm({
+                    title: 'Complete Foundation Infrastructure?',
+                    text: 'Mark foundation infrastructure as complete and proceed?',
+                    icon: 'question',
+                    confirmButtonText: 'Yes, Complete',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed) return;
+                await this.advanceStage('foundation-complete');
+            },
+
+            async completeInfrastructure() {
+                const result = await showConfirm({
+                    title: 'Complete Application Infrastructure?',
+                    text: 'Mark application infrastructure as complete and proceed?',
+                    icon: 'question',
+                    confirmButtonText: 'Yes, Complete',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed) return;
+                await this.advanceStage('infrastructure-complete');
+            },
+
+            async completeHandover() {
+                const result = await showConfirm({
+                    title: 'Complete Handover?',
+                    text: 'Complete the onboarding and hand over to the customer?',
+                    icon: 'question',
+                    confirmButtonText: 'Yes, Complete',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed) return;
+                await this.advanceStage('handover-complete');
+            },
+
+            async failStage(reason) {
+                const result = await showTextarea({
+                    title: 'Mark Stage as Failed',
+                    inputLabel: 'Reason for failure',
+                    inputPlaceholder: 'Describe what went wrong...',
+                    inputValue: reason || '',
+                    confirmButtonText: 'Mark as Failed',
+                    cancelButtonText: 'Cancel'
+                });
+
+                if (!result.isConfirmed || !result.value) return;
+
+                this.processing = true;
+                try {
+                    const response = await fetch(`/api/requests/${this.request.id}/fail`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-User-Email': '{{ user_email }}'
+                        },
+                        body: JSON.stringify({ reason: result.value })
+                    });
+                    if (response.ok) {
+                        await this.loadRequest();
+                        showSuccess('Stage marked as failed');
+                    } else {
+                        const data = await response.json();
+                        showError(data.error || 'Unknown error', 'Operation Failed');
+                    }
+                } catch (error) {
+                    showError(error.message, 'Network Error');
+                } finally {
+                    this.processing = false;
+                }
+            },
+
+            async advanceStage(action) {
+                this.processing = true;
+                try {
+                    const response = await fetch(`/api/requests/${this.request.id}/advance-stage`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json',
+                            'X-User-Email': '{{ user_email }}'
+                        },
+                        body: JSON.stringify({ action })
+                    });
+                    if (response.ok) {
+                        const data = await response.json();
+                        await this.loadRequest();
+                        showSuccess(data.message || 'Stage advanced successfully');
+                    } else {
+                        const data = await response.json();
+                        showError(data.error || 'Unknown error', 'Failed to Advance Stage');
+                    }
+                } catch (error) {
+                    showError(error.message, 'Network Error');
+                } finally {
+                    this.processing = false;
+                }
+            },
+
+            lifecycleStages() {
+                const stages = [...this.stageDefinitions];
+                if (this.request && this.request.status === 'REJECTED' && !stages.find(stage => stage.id === 'REJECTED')) {
+                    stages.push({ id: 'REJECTED', label: 'Rejected', description: 'This request was rejected. Review the reason above for context.', icon: 'x-circle' });
+                }
+                return stages.map((definition, index) => {
+                    const timelineEntries = this.stageAllTimelineEntries(definition.id);
+                    const latest = timelineEntries.length ? timelineEntries[0] : null;
+                    const auditLogs = this.auditLogsForStage(definition.id);
+                    const state = this.stageState(definition.id, index, latest, stages);
+                    return {
+                        ...definition,
+                        state,
+                        isLast: index === stages.length - 1,
+                        completedAt: latest && latest.status === 'COMPLETED' ? latest.created_at : null,
+                        failedAt: latest && latest.status === 'FAILED' ? latest.created_at : null,
+                        timelineEntries,
+                        auditLogs
+                    };
+                });
+            },
+
+            stageAllTimelineEntries(stageId) {
+                if (!this.request || !Array.isArray(this.request.timeline)) return [];
+                return this.request.timeline
+                    .filter(event => event.stage === stageId)
+                    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+            },
+
+            auditLogsForStage(stageId) {
+                if (!this.request || !Array.isArray(this.request.audit_logs)) return [];
+                const matchers = {
+                    REQUEST_RAISED: log => log.request_type === 'CREATE',
+                    PENDING_APPROVAL: log => ['SUBMIT', 'REJECT'].includes(log.request_type),
+                    APPROVED: log => log.request_type === 'APPROVE',
+                    SUBSCRIPTION_ASSIGNMENT: log => (log.action || '').toLowerCase().includes('assigned subscriptions'),
+                    FOUNDATION_INFRA: log => (log.action || '').toLowerCase().includes('foundation infrastructure'),
+                    INFRASTRUCTURE: log => (log.action || '').toLowerCase().includes('application infrastructure'),
+                    HANDOVER: log => (log.action || '').toLowerCase().includes('completed onboarding'),
+                    REJECTED: log => log.request_type === 'REJECT'
+                };
+                const matcher = matchers[stageId] || (() => false);
+                return this.request.audit_logs
+                    .filter(log => matcher(log))
+                    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+            },
+
+            stageState(stageId, index, entry, stages) {
+                if (!this.request) return 'not-started';
+
+                // Normalise timeline data
+                const normalizedStatus = entry?.status ? entry.status.toUpperCase() : null;
+                const message = (entry?.message || '').toLowerCase();
+                const explicitSkipped = normalizedStatus === 'SKIPPED' || message.includes('skip');
+
+                const requestStatus = this.request.status;
+                const stageOrder = stages.map(stage => stage.id);
+                const currentStageId = this.request.current_stage;
+                let currentIndex = stageOrder.indexOf(currentStageId);
+
+                const statusStageMap = {
+                    DRAFT: 'REQUEST_RAISED',
+                    PENDING: 'PENDING_APPROVAL',
+                    APPROVED: 'APPROVED',
+                    SUBSCRIPTION_ASSIGNED: 'SUBSCRIPTION_ASSIGNMENT',
+                    FOUNDATION_INFRA_PROVISIONING: 'FOUNDATION_INFRA',
+                    FOUNDATION_INFRA_COMPLETED: 'FOUNDATION_INFRA',
+                    INFRASTRUCTURE_PROVISIONING: 'INFRASTRUCTURE',
+                    INFRASTRUCTURE_COMPLETED: 'INFRASTRUCTURE',
+                    COMPLETED: 'HANDOVER',
+                    FAILED: currentStageId,
+                    REJECTED: 'PENDING_APPROVAL',
+                    CANCELLED: currentStageId
+                };
+
+                if (currentIndex === -1) {
+                    const fallbackStageId = statusStageMap[requestStatus] || null;
+                    currentIndex = fallbackStageId ? stageOrder.indexOf(fallbackStageId) : -1;
+                }
+
+                // Handle explicit timeline outcomes first
+                if (explicitSkipped) {
+                    return 'skipped';
+                }
+
+                if (normalizedStatus === 'FAILED') {
+                    return 'failed';
+                }
+
+                if (normalizedStatus === 'COMPLETED') {
+                    return 'completed';
+                }
+
+                if (normalizedStatus === 'IN_PROGRESS') {
+                    if (currentIndex !== -1 && index < currentIndex) {
+                        return 'skipped';
+                    }
+                    return 'in-progress';
+                }
+
+                // Request-level terminal states
+                if (requestStatus === 'FAILED') {
+                    if (currentIndex !== -1 && index === currentIndex) {
+                        return 'failed';
+                    }
+                    if (currentIndex !== -1 && index < currentIndex) {
+                        return entry ? 'completed' : 'skipped';
+                    }
+                    return 'not-started';
+                }
+
+                if (requestStatus === 'REJECTED') {
+                    if (stageId === 'REQUEST_RAISED') return 'completed';
+                    if (stageId === 'PENDING_APPROVAL') return 'failed';
+                    return 'not-started';
+                }
+
+                if (requestStatus === 'CANCELLED') {
+                    if (stageId === 'REQUEST_RAISED') return 'completed';
+                    if (currentIndex !== -1 && index < currentIndex) {
+                        return entry ? 'completed' : 'skipped';
+                    }
+                    if (currentIndex !== -1 && index === currentIndex) {
+                        return 'failed';
+                    }
+                    return 'not-started';
+                }
+
+                if (requestStatus === 'COMPLETED') {
+                    return 'completed';
+                }
+
+                if (stageId === 'REQUEST_RAISED') {
+                    return 'completed';
+                }
+
+                if (currentIndex === -1) {
+                    return index === 0 ? 'completed' : 'not-started';
+                }
+
+                if (index === currentIndex) {
+                    return 'in-progress';
+                }
+
+                if (index < currentIndex) {
+                    return entry ? 'completed' : 'skipped';
+                }
+
+                return 'not-started';
+            },
+
+            stageCircleClasses(stage) {
+                if (stage.state === 'completed') return 'border-emerald-500 bg-emerald-500 text-white shadow';
+                if (stage.state === 'in-progress') return 'border-sky-500 bg-sky-500/15 text-sky-600 shadow';
+                if (stage.state === 'failed') return 'border-rose-500 bg-rose-500/15 text-rose-600 shadow';
+                if (stage.state === 'skipped') return 'border-amber-500 bg-amber-500/15 text-amber-600 shadow';
+                return 'border-border bg-background text-muted-foreground';
+            },
+
+            stageLabelClasses(stage) {
+                if (stage.state === 'completed') return 'text-emerald-700 dark:text-emerald-200';
+                if (stage.state === 'in-progress') return 'text-sky-600 dark:text-sky-300';
+                if (stage.state === 'failed') return 'text-rose-600 dark:text-rose-300';
+                if (stage.state === 'skipped') return 'text-amber-600 dark:text-amber-300';
+                return 'text-muted-foreground';
+            },
+
+            stageConnectorClasses(stage) {
+                if (stage.state === 'completed') return 'bg-emerald-400';
+                if (stage.state === 'in-progress') return 'bg-sky-400 animate-pulse';
+                if (stage.state === 'failed') return 'bg-rose-400';
+                if (stage.state === 'skipped') return 'bg-amber-400/70';
+                return 'bg-border';
+            },
+
+            stageCardClasses(stage) {
+                if (stage.state === 'completed') return 'border-emerald-200 bg-emerald-50 dark:border-emerald-800 dark:bg-emerald-900/15';
+                if (stage.state === 'in-progress') return 'border-sky-200 bg-sky-50 dark:border-sky-800 dark:bg-sky-900/15';
+                if (stage.state === 'failed') return 'border-rose-200 bg-rose-50 dark:border-rose-800 dark:bg-rose-900/15';
+                if (stage.state === 'skipped') return 'border-amber-200 bg-amber-50 dark:border-amber-800 dark:bg-amber-900/20';
+                return 'border-border bg-background';
+            },
+
+            stageStatusPillClasses(stage) {
+                const state = stage?.state;
+                const base = 'bg-muted text-muted-foreground';
+                const variants = {
+                    'completed': 'bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-200',
+                    'in-progress': 'bg-sky-100 text-sky-700 dark:bg-sky-900/30 dark:text-sky-200',
+                    'failed': 'bg-rose-100 text-rose-700 dark:bg-rose-900/30 dark:text-rose-200',
+                    'skipped': 'bg-amber-100 text-amber-700 dark:bg-amber-900/30 dark:text-amber-200',
+                    'not-started': base
+                };
+                return variants[state] || base;
+            },
+
+            formatStageState(state) {
+                const labels = {
+                    'completed': 'Completed',
+                    'in-progress': 'In progress',
+                    'failed': 'Failed',
+                    'skipped': 'Skipped',
+                    'not-started': 'Not started'
+                };
+                return labels[state] || 'Unknown';
+            },
+
+            getStageById(stageId) {
+                return this.lifecycleStages().find(stage => stage.id === stageId) || null;
+            },
+
+            stageIcon(iconKey) {
+                const icons = {
+                    document: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h7l5 5v11a2 2 0 01-2 2z"/></svg>',
+                    clock: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>',
+                    shield: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M12 3l7 3v6c0 5.25-3.4 10.74-7 12-3.6-1.26-7-6.75-7-12V6l7-3z"/></svg>',
+                    key: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M21 2v6h-6"/><path stroke-linecap="round" stroke-linejoin="round" d="M7.11 11.11a5 5 0 117.07-7.07A5 5 0 017.11 11.11z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12.5 12.5l-5 5L5 17l-2 2"/></svg>',
+                    link: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 13a5 5 0 017.07 0l1 1a5 5 0 01-7.07 7.07l-1-1M14 11a5 5 0 00-7.07 0l-1 1a5 5 0 007.07 7.07l1-1"/></svg>',
+                    cube: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M20.5 7.5l-8.5-4.5-8.5 4.5v9l8.5 4.5 8.5-4.5v-9z"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 13.5l8.5-4.5"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 13.5v9"/><path stroke-linecap="round" stroke-linejoin="round" d="M12 13.5l-8.5-4.5"/></svg>',
+                    server: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 6a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2V6z"/><path stroke-linecap="round" stroke-linejoin="round" d="M4 16a2 2 0 012-2h12a2 2 0 012 2v2a2 2 0 01-2 2H6a2 2 0 01-2-2v-2z"/><path stroke-linecap="round" stroke-linejoin="round" d="M6 8h.01M10 8h.01M6 18h.01M10 18h.01"/></svg>',
+                    flag: '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4h13l-1 4 1 4H4v9"/></svg>',
+                    'x-circle': '<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"/><path stroke-linecap="round" stroke-linejoin="round" d="M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>'
+                };
+                return icons[iconKey] || icons.document;
+            },
+
+            formatStage(stage) {
+                if (!stage) return '';
+                return stage.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+            },
+
+            formatDate(dateString) {
+                if (!dateString) return '';
+                const date = new Date(dateString);
+                if (Number.isNaN(date.getTime())) return '';
+                return date.toLocaleDateString();
+            },
+
+            formatTimestamp(isoString) {
+                if (!isoString) return '';
+                const date = new Date(isoString);
+                if (Number.isNaN(date.getTime())) return '';
+                return date.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' });
+            },
+
+            formatRelative(isoString) {
+                if (!isoString) return '';
+                const date = new Date(isoString);
+                if (Number.isNaN(date.getTime())) return '';
+                return date.toLocaleString();
+            },
+
+            statusBadgeClasses(status) {
+                switch (status) {
+                    case 'PENDING':
+                        return 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-900/20 dark:text-amber-200';
+                    case 'APPROVED':
+                        return 'bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-900/20 dark:text-sky-200';
+                    case 'REJECTED':
+                        return 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-900/20 dark:text-rose-200';
+                    case 'SUBSCRIPTION_ASSIGNED':
+                    case 'FOUNDATION_INFRA_PROVISIONING':
+                    case 'FOUNDATION_INFRA_COMPLETED':
+                    case 'INFRASTRUCTURE_PROVISIONING':
+                    case 'INFRASTRUCTURE_COMPLETED':
+                        return 'bg-indigo-50 text-indigo-700 border border-indigo-200 dark:bg-indigo-900/20 dark:text-indigo-200';
+                    case 'COMPLETED':
+                        return 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-900/20 dark:text-emerald-200';
+                    case 'FAILED':
+                        return 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-900/20 dark:text-rose-200';
+                    default:
+                        return 'bg-slate-50 text-slate-700 border border-slate-200 dark:bg-slate-900/20 dark:text-slate-200';
+                }
+            },
+
+            statusIndicatorClasses(status) {
+                switch (status) {
+                    case 'PENDING':
+                        return 'bg-amber-500';
+                    case 'APPROVED':
+                        return 'bg-sky-500';
+                    case 'REJECTED':
+                        return 'bg-rose-500';
+                    case 'COMPLETED':
+                        return 'bg-emerald-500';
+                    case 'FAILED':
+                        return 'bg-rose-600';
+                    default:
+                        return 'bg-slate-400';
+                }
+            },
+
+            stageBadgeClasses(stageId) {
+                switch (stageId) {
+                    case 'SUBSCRIPTION_ASSIGNMENT':
+                        return 'border-indigo-200 text-indigo-700 bg-indigo-50/70 dark:border-indigo-800 dark:text-indigo-200 dark:bg-indigo-900/10';
+                    case 'FOUNDATION_INFRA':
+                        return 'border-sky-200 text-sky-700 bg-sky-50/70 dark:border-sky-800 dark:text-sky-200 dark:bg-sky-900/10';
+                    case 'INFRASTRUCTURE':
+                        return 'border-violet-200 text-violet-700 bg-violet-50/70 dark:border-violet-800 dark:text-violet-200 dark:bg-violet-900/10';
+                    case 'HANDOVER':
+                        return 'border-emerald-200 text-emerald-700 bg-emerald-50/70 dark:border-emerald-800 dark:text-emerald-200 dark:bg-emerald-900/10';
+                    default:
+                        return 'border-border bg-muted/40';
+                }
+            }
+        };
+    }
+</script>
+{% endblock %}

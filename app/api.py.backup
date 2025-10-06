@@ -1,0 +1,737 @@
+"""API Blueprint - RESTful API endpoints using service layer."""
+
+from datetime import datetime
+from typing import Optional
+
+from flask import Blueprint, current_app, jsonify, request
+from pydantic import ValidationError
+
+from app.models import RequestStatus, RequestType, WorkflowStage, db
+from app.schemas import ApprovalRequest, LookupDataCreate, OnboardingRequest
+from app.services import ApplicationService, AuthService, LookupService
+
+api_bp = Blueprint("api", __name__, url_prefix="/api")
+
+
+def get_current_user_email() -> str:
+    """Get current user email from request headers or session."""
+    # In production, this would come from Azure AD token
+    return request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+
+def get_application_service() -> ApplicationService:
+    """Get application service instance."""
+    return ApplicationService(db)
+
+
+def get_lookup_service() -> LookupService:
+    """Get lookup service instance."""
+    return LookupService(db)
+
+
+def get_auth_service() -> AuthService:
+    """Get auth service instance."""
+    return AuthService()
+
+
+@api_bp.route("/health", methods=["GET"])
+def health_check():
+    """Health check endpoint."""
+    return jsonify({"status": "healthy", "timestamp": datetime.utcnow().isoformat()})
+
+
+@api_bp.route("/validate/slug/<slug>", methods=["GET"])
+def validate_slug(slug: str):
+    """Validate app slug uniqueness."""
+    try:
+        app_service = get_application_service()
+        
+        # Sanitize and format slug
+        slug = slug.strip().lower()
+
+        # Validate format (alphanumeric only, 4-6 chars)
+        if not slug or len(slug) < 4 or len(slug) > 6:
+            return (
+                jsonify(
+                    {
+                        "available": False,
+                        "message": "Slug must be between 4 and 6 characters",
+                    }
+                ),
+                400,
+            )
+
+        if not slug.isalnum():
+            return (
+                jsonify(
+                    {
+                        "available": False,
+                        "message": "Slug must contain only alphanumeric characters",
+                    }
+                ),
+                400,
+            )
+
+        # Check uniqueness using service
+        is_available = app_service.is_slug_available(slug)
+
+        if is_available:
+            return jsonify({"available": True, "message": "Slug is available"}), 200
+        else:
+            return (
+                jsonify({"available": False, "message": "This slug is already taken"}),
+                200,
+            )
+
+    except Exception as e:
+        return (
+            jsonify({"available": False, "message": f"Validation error: {str(e)}"}),
+            500,
+        )
+
+
+@api_bp.route("/requests", methods=["GET"])
+def get_requests():
+    """Get all onboarding requests."""
+    user_email = get_current_user_email()
+    app_service = get_application_service()
+    auth_service = get_auth_service()
+
+    # Admins see all requests, users see only their own
+    if auth_service.is_admin(user_email):
+        applications = app_service.list_applications()
+    else:
+        applications = app_service.list_applications(requester=user_email)
+
+    return jsonify({"requests": [app.to_dict() for app in applications]})
+
+
+@api_bp.route("/requests/<int:request_id>", methods=["GET"])
+def get_request(request_id):
+    """Get specific onboarding request."""
+    user_email = get_current_user_email()
+    app_service = get_application_service()
+    auth_service = get_auth_service()
+
+    application = app_service.get_application(request_id)
+    if not application:
+        return jsonify({"error": "Application not found"}), 404
+
+    # Check authorization
+    if not auth_service.is_admin(user_email) and application.requested_by != user_email:
+        return jsonify({"error": "Unauthorized"}), 403
+
+    # Get audit logs using repository
+    from app.repositories import AuditRepository
+    audit_repo = AuditRepository(db)
+    audit_logs = audit_repo.get_by_app_id(request_id)
+
+    # Convert application to dict and add audit logs
+    result = application.to_dict()
+    result["audit_logs"] = [log.to_dict() for log in audit_logs]
+
+    return jsonify(result)
+
+
+@api_bp.route("/requests", methods=["POST"])
+def create_request():
+    """Create new onboarding request."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    try:
+        # Validate request data
+        data = OnboardingRequest(**request.json)  # type: ignore
+
+        # Check if app_slug already exists
+        existing = Application.query.filter_by(app_slug=data.app_slug).first()
+        if existing:
+            return (
+                jsonify(
+                    {"error": f"Application with slug '{data.app_slug}' already exists"}
+                ),
+                400,
+            )
+
+        # Generate unique app_code (auto-generated)
+        from app.utils import generate_app_code
+
+        app_code = generate_app_code(RequestType.ONBOARDING)
+
+        # Create application
+        application = Application(  # type: ignore
+            request_type=RequestType.ONBOARDING.value,
+            app_code=app_code,
+            app_slug=data.app_slug,
+            application_name=data.application_name,
+            organization=data.organization,
+            lob=data.lob,
+            platform=data.platform,
+            requested_by=user_email,
+            status=RequestStatus.PENDING,
+            current_stage=WorkflowStage.PENDING_APPROVAL,
+        )
+        db.session.add(application)
+        db.session.flush()  # Get application.id
+
+        # Create environments
+        for env_data in data.environments:
+            environment = AppEnvironment(  # type: ignore
+                app_id=application.id,
+                environment_name=env_data.environment_name,
+                region=env_data.region,
+            )
+            db.session.add(environment)
+
+        # Add timeline entry - Request raised
+        add_timeline_entry(
+            app_id=application.id,
+            stage=WorkflowStage.REQUEST_RAISED,
+            status="COMPLETED",
+            message=f"Request created by {user_email}",
+            performed_by=user_email,
+        )
+
+        # Add timeline entry - Pending approval
+        add_timeline_entry(
+            app_id=application.id,
+            stage=WorkflowStage.PENDING_APPROVAL,
+            status="IN_PROGRESS",
+            message="Waiting for admin approval",
+            performed_by=user_email,
+        )
+
+        # Log audit
+        log_audit(
+            request_type="CREATE",
+            user_email=user_email,
+            action=f"Created onboarding request for {app_code} (slug: {data.app_slug})",
+            app_id=application.id,
+            details=f"Organization: {data.organization}, LOB: {data.lob}",
+        )
+
+        db.session.commit()
+
+        return (
+            jsonify(
+                {
+                    "message": "Onboarding request created successfully",
+                    "request_id": application.id,
+                    "app_code": application.app_code,
+                    "app_slug": application.app_slug,
+                }
+            ),
+            201,
+        )
+
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "details": e.errors()}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/requests/<int:request_id>/approve", methods=["POST"])
+def approve_request(request_id):
+    """Approve or reject onboarding request (Admin only)."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    # Check admin authorization
+    if not is_admin(user_email):
+        return jsonify({"error": "Unauthorized - Admin access required"}), 403
+
+    try:
+        # Validate approval data
+        approval_data = ApprovalRequest(**request.json)  # type: ignore
+
+        application = Application.query.get_or_404(request_id)
+
+        # Check if already processed
+        if application.status != RequestStatus.PENDING:
+            return (
+                jsonify({"error": f"Request already {application.status.value}"}),
+                400,
+            )
+
+        # Update application status
+        if approval_data.approved:
+            application.status = RequestStatus.APPROVED
+            application.approved_by = user_email
+            application.onboarding_date = datetime.utcnow()
+            application.current_stage = WorkflowStage.SUBSCRIPTION_ASSIGNMENT
+            action = f"Approved onboarding request for {application.app_code}"
+
+            # Complete pending approval stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.PENDING_APPROVAL,
+                status="COMPLETED",
+                message=f"Request approved by {user_email}",
+                performed_by=user_email,
+            )
+
+            # Add approved stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.APPROVED,
+                status="COMPLETED",
+                message="Request approved, proceeding to subscription assignment",
+                performed_by=user_email,
+            )
+
+            # Start subscription assignment stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.SUBSCRIPTION_ASSIGNMENT,
+                status="IN_PROGRESS",
+                message="Waiting for admin to assign subscriptions to environments",
+                performed_by=user_email,
+            )
+        else:
+            application.status = RequestStatus.REJECTED
+            application.approved_by = user_email
+            application.rejection_reason = approval_data.rejection_reason
+            application.current_stage = WorkflowStage.REJECTED
+            action = f"Rejected onboarding request for {application.app_code}"
+
+            # Complete pending approval with rejection
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.PENDING_APPROVAL,
+                status="COMPLETED",
+                message=f"Request rejected by {user_email}",
+                performed_by=user_email,
+            )
+
+            # Add rejected stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.REJECTED,
+                status="COMPLETED",
+                message=f"Reason: {approval_data.rejection_reason}",
+                performed_by=user_email,
+            )
+
+        # Log audit
+        log_audit(
+            request_type="APPROVE" if approval_data.approved else "REJECT",
+            user_email=user_email,
+            action=action,
+            app_id=application.id,
+            details=(
+                approval_data.rejection_reason if not approval_data.approved else None
+            ),
+        )
+
+        db.session.commit()
+
+        return jsonify(
+            {
+                "message": "Request processed successfully",
+                "status": application.status.value,
+            }
+        )
+
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "details": e.errors()}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/requests/<int:request_id>/assign-subscriptions", methods=["POST"])
+def assign_subscriptions(request_id):
+    """Assign subscription IDs to environments (Admin only)."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    # Check admin authorization
+    if not is_admin(user_email):
+        return jsonify({"error": "Unauthorized - Admin access required"}), 403
+
+    try:
+        application = Application.query.get_or_404(request_id)
+
+        # Check if request is approved
+        if application.status != RequestStatus.APPROVED:
+            return jsonify({"error": "Request must be approved first"}), 400
+
+        # Check if already in subscription assignment stage
+        if application.current_stage != WorkflowStage.SUBSCRIPTION_ASSIGNMENT:
+            return (
+                jsonify({"error": "Request is not in subscription assignment stage"}),
+                400,
+            )
+
+        # Get subscription assignments from request body
+        # Expected format: [{"env_id": 1, "subscription_id": "sub-123"}, ...]
+        assignments = request.json.get("assignments", [])
+
+        if not assignments:
+            return jsonify({"error": "No subscription assignments provided"}), 400
+
+        # Update each environment with subscription ID
+        all_assigned = True
+        for assignment in assignments:
+            env_id = assignment.get("env_id")
+            subscription_id = assignment.get("subscription_id")
+
+            if not env_id or not subscription_id:
+                continue
+
+            environment = AppEnvironment.query.filter_by(
+                id=env_id, app_id=request_id
+            ).first()
+
+            if environment:
+                environment.subscription_id = subscription_id
+                environment.is_assigned = True
+                environment.assigned_by = user_email
+                environment.assigned_at = datetime.utcnow()
+
+        # Check if all environments have subscriptions assigned
+        all_envs = AppEnvironment.query.filter_by(app_id=request_id).all()
+        all_assigned = all([env.is_assigned for env in all_envs])
+
+        if all_assigned:
+            # Move to next stage - Foundation Infrastructure
+            application.current_stage = WorkflowStage.FOUNDATION_INFRA
+            application.status = RequestStatus.FOUNDATION_INFRA_PROVISIONING
+
+            # Complete subscription assignment stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.SUBSCRIPTION_ASSIGNMENT,
+                status="COMPLETED",
+                message=f"All subscriptions assigned by {user_email}",
+                performed_by=user_email,
+            )
+
+            # Start foundation infra stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.FOUNDATION_INFRA,
+                status="IN_PROGRESS",
+                message="Foundation infrastructure provisioning in progress",
+                performed_by=user_email,
+            )
+
+        # Log audit
+        log_audit(
+            request_type="UPDATE",
+            user_email=user_email,
+            action=f"Assigned subscriptions to environments for {application.app_code}",
+            app_id=application.id,
+            details=f"Assigned {len(assignments)} subscriptions",
+        )
+
+        db.session.commit()
+
+        return jsonify(
+            {
+                "message": "Subscriptions assigned successfully",
+                "all_assigned": all_assigned,
+                "current_stage": application.current_stage.value,
+            }
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/requests/<int:request_id>/advance-stage", methods=["POST"])
+def advance_stage(request_id):
+    """Advance request through workflow stages (Admin only)."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    if not is_admin(user_email):
+        return jsonify({"error": "Unauthorized - Admin access required"}), 403
+
+    try:
+        data = request.json
+        action = data.get("action")
+
+        application = Application.query.get_or_404(request_id)
+
+        # Handle different stage advancement actions
+        if action == "foundation-complete":
+            if application.current_stage != WorkflowStage.FOUNDATION_INFRA:
+                return jsonify({"error": "Invalid stage for this action"}), 400
+
+            # Complete foundation stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.FOUNDATION_INFRA,
+                status="COMPLETED",
+                message="Foundation infrastructure provisioned successfully",
+                performed_by=user_email,
+            )
+
+            # Move to infrastructure stage
+            application.current_stage = WorkflowStage.INFRASTRUCTURE
+            application.status = RequestStatus.INFRASTRUCTURE_PROVISIONING
+
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.INFRASTRUCTURE,
+                status="IN_PROGRESS",
+                message="Application infrastructure provisioning started",
+                performed_by=user_email,
+            )
+
+            log_audit(
+                request_type="UPDATE",
+                user_email=user_email,
+                action=f"Completed foundation infrastructure for {application.app_code}",
+                app_id=application.id,
+                details="Moved to Infrastructure stage",
+            )
+
+            message = "Foundation infrastructure marked complete, moved to Application Infrastructure"
+
+        elif action == "infrastructure-complete":
+            if application.current_stage != WorkflowStage.INFRASTRUCTURE:
+                return jsonify({"error": "Invalid stage for this action"}), 400
+
+            # Complete infrastructure stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.INFRASTRUCTURE,
+                status="COMPLETED",
+                message="Application infrastructure provisioned successfully",
+                performed_by=user_email,
+            )
+
+            # Move to handover stage
+            application.current_stage = WorkflowStage.HANDOVER
+            application.status = RequestStatus.INFRASTRUCTURE_COMPLETED
+
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.HANDOVER,
+                status="IN_PROGRESS",
+                message="Ready for customer handover",
+                performed_by=user_email,
+            )
+
+            log_audit(
+                request_type="UPDATE",
+                user_email=user_email,
+                action=f"Completed application infrastructure for {application.app_code}",
+                app_id=application.id,
+                details="Moved to Handover stage",
+            )
+
+            message = "Application infrastructure marked complete, moved to Handover"
+
+        elif action == "handover-complete":
+            if application.current_stage != WorkflowStage.HANDOVER:
+                return jsonify({"error": "Invalid stage for this action"}), 400
+
+            # Complete handover stage
+            add_timeline_entry(
+                app_id=application.id,
+                stage=WorkflowStage.HANDOVER,
+                status="COMPLETED",
+                message="Onboarding completed and handed over to customer",
+                performed_by=user_email,
+            )
+
+            # Mark as completed (keep current_stage at HANDOVER for history)
+            application.current_stage = WorkflowStage.HANDOVER
+            application.status = RequestStatus.COMPLETED
+
+            log_audit(
+                request_type="UPDATE",
+                user_email=user_email,
+                action=f"Completed onboarding for {application.app_code}",
+                app_id=application.id,
+                details="Onboarding completed successfully",
+            )
+
+            message = "Onboarding completed successfully!"
+
+        else:
+            return jsonify({"error": "Invalid action"}), 400
+
+        db.session.commit()
+
+        return jsonify(
+            {
+                "message": message,
+                "current_stage": (
+                    application.current_stage.value
+                    if application.current_stage
+                    else None
+                ),
+                "status": application.status.value,
+            }
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/requests/<int:request_id>/fail", methods=["POST"])
+def fail_stage(request_id):
+    """Mark a stage as failed (Admin only)."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    if not is_admin(user_email):
+        return jsonify({"error": "Unauthorized - Admin access required"}), 403
+
+    try:
+        data = request.json
+        reason = data.get("reason", "No reason provided")
+
+        application = Application.query.get_or_404(request_id)
+
+        if not application.current_stage:
+            return jsonify({"error": "No active stage to fail"}), 400
+
+        # Mark current stage as failed
+        add_timeline_entry(
+            app_id=application.id,
+            stage=application.current_stage,
+            status="FAILED",
+            message=f"Stage failed: {reason}",
+            performed_by=user_email,
+        )
+
+        # Update app status
+        application.status = RequestStatus.FAILED
+
+        log_audit(
+            request_type="UPDATE",
+            user_email=user_email,
+            action=f"Marked {application.current_stage.value} stage as failed for {application.app_code}",
+            app_id=application.id,
+            details=reason,
+        )
+
+        db.session.commit()
+
+        return jsonify(
+            {"message": "Stage marked as failed", "status": application.status.value}
+        )
+
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/lookup", methods=["GET"])
+def get_lookup_data():
+    """Get lookup data (Organizations, LOBs, Environments, etc.)."""
+    field_type = request.args.get("field")
+
+    query = LookupData.query.filter_by(is_active=True)
+    if field_type:
+        query = query.filter_by(field=field_type)
+
+    lookup_data = query.order_by(LookupData.field, LookupData.value).all()
+
+    # Group by field
+    result = {}
+    for item in lookup_data:
+        if item.field not in result:
+            result[item.field] = []
+        result[item.field].append(item.to_dict())
+
+    return jsonify(result)
+
+
+@api_bp.route("/lookup", methods=["POST"])
+def create_lookup_data():
+    """Create new lookup data (Admin only)."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    if not is_admin(user_email):
+        return jsonify({"error": "Unauthorized - Admin access required"}), 403
+
+    try:
+        data = LookupDataCreate(**request.json)  # type: ignore
+
+        # Check for duplicates
+        existing = LookupData.query.filter_by(
+            field=data.field, value=data.value, is_active=True
+        ).first()
+        if existing:
+            return jsonify({"error": "Lookup data already exists"}), 400
+
+        lookup = LookupData(  # type: ignore
+            field=data.field,
+            value=data.value,
+            abbreviation=data.abbreviation,
+        )
+        db.session.add(lookup)
+
+        log_audit(
+            request_type="CREATE",
+            user_email=user_email,
+            action=f"Created lookup data: {data.field} - {data.value}",
+        )
+
+        db.session.commit()
+
+        return (
+            jsonify({"message": "Lookup data created successfully", "id": lookup.id}),
+            201,
+        )
+
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "details": e.errors()}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/stats", methods=["GET"])
+def get_stats():
+    """Get dashboard statistics."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    if is_admin(user_email):
+        stats = {
+            "total_requests": Application.query.count(),
+            "pending": Application.query.filter_by(
+                status=RequestStatus.PENDING
+            ).count(),
+            "approved": Application.query.filter_by(
+                status=RequestStatus.APPROVED
+            ).count(),
+            "rejected": Application.query.filter_by(
+                status=RequestStatus.REJECTED
+            ).count(),
+            "completed": Application.query.filter_by(
+                status=RequestStatus.COMPLETED
+            ).count(),
+        }
+    else:
+        stats = {
+            "my_requests": Application.query.filter_by(requested_by=user_email).count(),
+            "pending": Application.query.filter_by(
+                requested_by=user_email, status=RequestStatus.PENDING
+            ).count(),
+            "approved": Application.query.filter_by(
+                requested_by=user_email, status=RequestStatus.APPROVED
+            ).count(),
+        }
+
+    return jsonify(stats)
+
+
+@api_bp.route("/audit", methods=["GET"])
+def get_audit_log():
+    """Get audit log (Admin only)."""
+    user_email = request.headers.get("X-User-Email", "guest@tradexfoods.com")
+
+    if not is_admin(user_email):
+        return jsonify({"error": "Unauthorized - Admin access required"}), 403
+
+    limit = request.args.get("limit", 100, type=int)
+    audits = (
+        RequestAudit.query.order_by(RequestAudit.timestamp.desc()).limit(limit).all()
+    )
+
+    return jsonify({"audits": [audit.to_dict() for audit in audits]})

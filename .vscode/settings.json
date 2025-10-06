@@ -1,0 +1,25 @@
+{
+    "cSpell.words": [
+        "backref",
+        "dotenv",
+        "findstr",
+        "gunicorn",
+        "jsonify",
+        "onclick",
+        "onupdate",
+        "pycache",
+        "pydantic",
+        "pyodbc",
+        "pyproject",
+        "shadcn",
+        "SQLALCHEMY",
+        "taskkill",
+        "tradex",
+        "tradexmetadatasvr",
+        "venv"
+    ],
+    "explorer.excludeGitIgnore": false,
+    "files.associations": {
+        "*.html": "jinja-html"
+    }
+}

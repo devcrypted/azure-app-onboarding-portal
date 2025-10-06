@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Login - TradeX Platform Onboarding{% endblock %}
+
+{% block content %}
+<div class="flex items-center justify-center py-12">
+    <div class="mx-auto w-full max-w-md space-y-6">
+        <div class="space-y-2 text-center">
+            <h1 class="text-3xl font-bold">Sign in to your account</h1>
+            <p class="text-muted-foreground">
+                TradeX Platform Onboarding Portal
+            </p>
+        </div>
+
+        <div class="card p-6">
+            <!-- Simplified login for demo (In production, use Azure AD OAuth) -->
+            <form action="{{ url_for('web.auth_callback') }}" method="POST" class="space-y-4">
+                <div class="space-y-2">
+                    <label for="email" class="text-sm font-medium leading-none peer-disabled:cursor-not-allowed peer-disabled:opacity-70">
+                        Email address
+                    </label>
+                    <input id="email" name="email" type="email" required
+                           class="input"
+                           placeholder="user@tradex.com">
+                </div>
+
+                <div class="rounded-lg border bg-muted p-4" role="alert">
+                    <div class="flex">
+                        <div class="ml-3">
+                            <h3 class="text-sm font-medium">Demo Mode</h3>
+                            <div class="mt-2 text-sm text-muted-foreground">
+                                <p>Enter any email address. Use <code class="bg-muted px-1.5 py-0.5 rounded text-xs">admin@tradex.com</code> for admin access.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <button type="submit" class="btn btn-primary w-full">
+                    Sign in
+                </button>
+            </form>
+
+            <div class="mt-6 rounded-lg bg-muted p-4">
+                <p class="text-sm text-muted-foreground text-center">
+                    Production will use Azure AD OAuth
+                </p>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
