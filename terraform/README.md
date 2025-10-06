@@ -36,6 +36,9 @@ terraform apply `
 | `github_owner` | GitHub account or organization. | `devcrypted` |
 | `github_repository` | Repository name (without owner). | `azure-app-onboarding-portal` |
 | `github_branch` | Branch to deploy from. | `main` |
+| `app_service_sku` | Linux App Service Plan SKU. | `B1` |
+| `sql_sku_name` | Azure SQL Database SKU. | `Basic` |
+| `sql_auto_pause_delay` | Auto-pause delay for serverless tiers (set when using serverless SKUs). | `null` |
 
 ### Post-Deployment Steps
 
@@ -64,6 +67,6 @@ terraform destroy
 ## Notes
 
 - The App Service is configured with system-assigned managed identity for future enhancements.
-- The SQL database uses the `GP_S_Gen5_2` serverless tier by default. Adjust `sql_sku_name`,
-  `sql_auto_pause_delay`, or other settings as needed for production workloads.
+- The SQL database defaults to the `Basic` tier to minimize cost. Update `sql_sku_name`,
+  `sql_auto_pause_delay`, or other settings if you need higher performance or serverless capabilities.
 - Secrets and sensitive outputs are marked accordingly; use secure storage when persisting them.

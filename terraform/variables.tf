@@ -51,19 +51,19 @@ variable "sql_administrator_login" {
 variable "sql_sku_name" {
   type        = string
   description = "Azure SQL database SKU name."
-  default     = "GP_S_Gen5_2"
+  default     = "Basic"
 }
 
 variable "sql_auto_pause_delay" {
   type        = number
   description = "Auto-pause delay in minutes for the Azure SQL database when using serverless compute. Set to -1 to disable auto-pausing."
-  default     = 60
+  default     = null
 }
 
 variable "app_service_sku" {
   type        = string
   description = "App Service Plan SKU (e.g. B1, P1v3)."
-  default     = "P1v3"
+  default     = "B1"
 }
 
 variable "github_owner" {

@@ -75,7 +75,7 @@ resource "azurerm_mssql_database" "primary" {
   server_id   = azurerm_mssql_server.primary.id
   sku_name    = var.sql_sku_name
   collation   = "SQL_Latin1_General_CP1_CI_AS"
-  max_size_gb = 32
+  max_size_gb = 2
 
   lifecycle {
     ignore_changes = [threat_detection_policy]
