@@ -117,6 +117,8 @@ resource "azurerm_linux_web_app" "primary" {
   }
 
   site_config {
+    app_command_line = "gunicorn app.main:app"
+
     application_stack {
       python_version = "3.12"
     }
