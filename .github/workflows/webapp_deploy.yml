@@ -66,5 +66,5 @@ jobs:
         uses: azure/webapps-deploy@v3
         id: deploy-to-webapp
         with:
-          app-name: "apponboard"
+          app-name: ${{ secrets.AZURE_WEBAPP_NAME }}
           slot-name: "Production"
