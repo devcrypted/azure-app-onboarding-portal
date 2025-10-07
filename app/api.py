@@ -12,8 +12,19 @@ from pydantic import ValidationError
 
 from app.models import RequestStatus, RequestType, WorkflowStage, db
 from app.repositories import AuditRepository
-from app.schemas import ApprovalRequest, LookupDataCreate, OnboardingRequest
-from app.services import ApplicationService, AuthService, LookupService
+from app.schemas import (
+    ApprovalRequest,
+    FirewallRequestCreate,
+    LookupDataCreate,
+    OnboardingRequest,
+)
+from app.services import (
+    ApplicationService,
+    AuthService,
+    FirewallRequestService,
+    LookupService,
+)
+from app.services.firewall_request_service import DuplicateFirewallRuleError
 
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
@@ -41,6 +52,7 @@ def get_services() -> Dict[str, Any]:
         "app": ApplicationService(db),
         "auth": AuthService(),
         "lookup": LookupService(db),
+        "firewall": FirewallRequestService(db),
     }
 
 
@@ -129,11 +141,39 @@ def get_requests():
     user_email = get_current_user_email()
     services = get_services()
 
-    # Admins see all requests, users see only their own
-    if services["auth"].is_admin(user_email):
+    request_type_filter = request.args.get("type")
+    status_filter = request.args.get("status")
+    is_admin = services["auth"].is_admin(user_email)
+    is_network_admin = services["auth"].is_network_admin(user_email)
+
+    try:
+        request_type = (
+            RequestType[request_type_filter.upper()] if request_type_filter else None
+        )
+    except KeyError:
+        return (
+            jsonify({"error": f"Unknown request type '{request_type_filter}'"}),
+            400,
+        )
+
+    try:
+        status = RequestStatus[status_filter.upper()] if status_filter else None
+    except KeyError:
+        return (
+            jsonify({"error": f"Unknown status '{status_filter}'"}),
+            400,
+        )
+
+    if is_admin or is_network_admin:
         applications = services["app"].list_applications()
     else:
         applications = services["app"].list_applications(requester=user_email)
+
+    if request_type:
+        applications = [app for app in applications if app.request_type == request_type]
+
+    if status:
+        applications = [app for app in applications if app.status == status]
 
     return jsonify({"requests": [app.to_dict() for app in applications]})
 
@@ -227,6 +267,73 @@ def create_request():
         return jsonify({"error": str(e)}), 400
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/requests/firewall", methods=["POST"])
+def create_firewall_request():
+    """Create a new firewall request."""
+
+    user_email = get_current_user_email()
+    services = get_services()
+
+    try:
+        payload = FirewallRequestCreate(**request.json)  # type: ignore[arg-type]
+        firewall_request = services["firewall"].create_firewall_request(
+            payload,
+            requested_by=user_email,
+            ip_address=request.remote_addr,
+        )
+
+        application = firewall_request.application
+
+        return (
+            jsonify(
+                {
+                    "message": "Firewall request submitted successfully",
+                    "request_id": firewall_request.id,
+                    "app_id": application.id,
+                    "app_code": application.app_code,
+                    "application_status": application.status.value,
+                    "firewall_request": firewall_request.to_dict(),
+                }
+            ),
+            201,
+        )
+
+    except ValidationError as e:
+        return jsonify({"error": "Validation failed", "details": e.errors()}), 400
+    except DuplicateFirewallRuleError as e:
+        return jsonify({"error": str(e), "duplicates": e.duplicates}), 409
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({"error": str(e)}), 500
+
+
+@api_bp.route("/requests/firewall", methods=["GET"])
+def list_firewall_requests():
+    """List firewall requests for the caller or all if authorized."""
+
+    user_email = get_current_user_email()
+    services = get_services()
+
+    is_admin = services["auth"].is_admin(user_email)
+    is_network_admin = services["auth"].is_network_admin(user_email)
+    include_all = is_admin or is_network_admin
+
+    firewall_requests = services["firewall"].list_requests(
+        user_email=user_email, include_all=include_all
+    )
+
+    return jsonify(
+        {
+            "requests": [
+                firewall_request.to_dict() for firewall_request in firewall_requests
+            ],
+            "visibility": "all" if include_all else "own",
+        }
+    )
 
 
 @api_bp.route("/requests/<int:request_id>/submit", methods=["POST"])

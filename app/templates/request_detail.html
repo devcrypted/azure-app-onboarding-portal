@@ -28,6 +28,10 @@
                         <span x-show="request?.app_slug">&nbsp;•&nbsp;Slug: <span
                                 x-text="request?.app_slug"></span></span>
                     </p>
+                    <p class="mt-1 flex items-center gap-2">
+                        <span class="inline-flex items-center rounded-full bg-slate-200 px-2.5 py-0.5 text-xs font-semibold uppercase tracking-wide text-slate-700"
+                              x-text="formatRequestType(request?.request_type)"></span>
+                    </p>
                 </div>
 
                 <div class="flex flex-wrap items-center gap-3">
@@ -80,8 +84,7 @@
             <div class="card">
                 <div class="border-b border-border px-4 py-5 sm:px-6">
                     <h2 class="text-lg font-medium text-foreground">Request Information</h2>
-                    <p class="mt-1 text-sm text-muted-foreground">Key attributes associated with this onboarding
-                        request.</p>
+                    <p class="mt-1 text-sm text-muted-foreground" x-text="requestInformationSubtitle()"></p>
                 </div>
                 <div class="px-4 py-5 sm:p-6">
                     <dl class="grid gap-4 sm:grid-cols-2">
@@ -106,8 +109,94 @@
                 </div>
             </div>
 
+            <!-- Firewall Details -->
+            <div class="card" x-show="isFirewallRequest" x-cloak>
+                <div class="border-b border-border px-4 py-5 sm:px-6">
+                    <h2 class="text-lg font-medium text-foreground">Firewall Request</h2>
+                    <p class="mt-1 text-sm text-muted-foreground">Rule set submitted for network review and implementation.</p>
+                </div>
+                <div class="space-y-6 px-4 py-5 sm:p-6">
+                    <div class="grid gap-6 sm:grid-cols-2">
+                        <div>
+                            <p class="text-sm font-medium text-muted-foreground">Destination Service</p>
+                            <p class="mt-1 text-sm text-foreground" x-text="request?.firewall_details?.destination_service || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-muted-foreground">Environment Scopes</p>
+                            <p class="mt-1 text-sm text-foreground"
+                               x-text="(request?.firewall_details?.environment_scopes || []).map(scope => environmentScopeLabel(scope)).join(', ') || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-muted-foreground">Requested Effective Date</p>
+                            <p class="mt-1 text-sm text-foreground"
+                               x-text="formatDate(request?.firewall_details?.requested_effective_date) || '—'"></p>
+                        </div>
+                        <div>
+                            <p class="text-sm font-medium text-muted-foreground">Expires At</p>
+                            <p class="mt-1 text-sm text-foreground"
+                               x-text="formatDate(request?.firewall_details?.expires_at) || '—'"></p>
+                        </div>
+                        <div class="sm:col-span-2">
+                            <p class="text-sm font-medium text-muted-foreground">Justification</p>
+                            <p class="mt-1 whitespace-pre-line text-sm text-foreground"
+                               x-text="request?.firewall_details?.justification || '—'"></p>
+                        </div>
+                        <div class="sm:col-span-2" x-show="request?.firewall_details?.github_pr_url">
+                            <p class="text-sm font-medium text-muted-foreground">GitHub PR</p>
+                            <a class="mt-1 inline-flex items-center gap-1 text-sm text-primary hover:underline"
+                               :href="request?.firewall_details?.github_pr_url" target="_blank" rel="noopener">
+                                <span x-text="request?.firewall_details?.github_pr_url"></span>
+                                <svg class="h-3.5 w-3.5" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M5 3a2 2 0 00-2 2v10a2 2 0 002 2h5a1 1 0 100-2H5V5h10v5a1 1 0 102 0V5a2 2 0 00-2-2H5zm5.293 4.293a1 1 0 011.414 0L16 11.586V9a1 1 0 112 0v6a1 1 0 01-1 1h-6a1 1 0 110-2h2.586l-4.293-4.293a1 1 0 010-1.414z" clip-rule="evenodd" />
+                                </svg>
+                            </a>
+                        </div>
+                    </div>
+
+                    <div class="space-y-3">
+                        <div class="flex items-center justify-between">
+                            <h3 class="text-base font-semibold text-foreground">Submitted rule entries</h3>
+                            <span class="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+                                  x-text="(request?.firewall_details?.rule_entries || []).length + ' rule(s)'"></span>
+                        </div>
+                        <div class="overflow-hidden rounded-lg border border-border">
+                            <table class="min-w-full divide-y divide-border text-sm">
+                                <thead class="bg-muted/60 text-xs uppercase text-muted-foreground">
+                                    <tr>
+                                        <th class="px-4 py-3 text-left font-semibold">Source</th>
+                                        <th class="px-4 py-3 text-left font-semibold">Destination</th>
+                                        <th class="px-4 py-3 text-left font-semibold">Ports</th>
+                                        <th class="px-4 py-3 text-left font-semibold">Protocol</th>
+                                        <th class="px-4 py-3 text-left font-semibold">Direction</th>
+                                        <th class="px-4 py-3 text-left font-semibold">Description</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="divide-y divide-border/80" x-show="(request?.firewall_details?.rule_entries || []).length">
+                                    <template x-for="rule in (request?.firewall_details?.rule_entries || [])" :key="rule.id">
+                                        <tr class="bg-background">
+                                            <td class="px-4 py-3 font-mono text-xs text-foreground" x-text="rule.source"></td>
+                                            <td class="px-4 py-3 font-mono text-xs text-foreground" x-text="rule.destination"></td>
+                                            <td class="px-4 py-3 font-mono text-xs text-foreground"
+                                                x-text="(rule.ports || []).join(', ')"></td>
+                                            <td class="px-4 py-3 text-xs font-semibold uppercase" x-text="rule.protocol"></td>
+                                            <td class="px-4 py-3 text-xs font-semibold uppercase" x-text="rule.direction"></td>
+                                            <td class="px-4 py-3 text-xs text-foreground" x-text="rule.description || '—'"></td>
+                                        </tr>
+                                    </template>
+                                </tbody>
+                                <tbody x-show="!(request?.firewall_details?.rule_entries || []).length">
+                                    <tr>
+                                        <td colspan="6" class="px-4 py-6 text-center text-sm text-muted-foreground">No rule entries recorded.</td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
             <!-- Environments -->
-            <div class="card">
+            <div class="card" x-show="isOnboardingRequest" x-cloak>
                 <div class="border-b border-border px-4 py-5 sm:px-6">
                     <h2 class="text-lg font-medium text-foreground">Environments</h2>
                     <p class="mt-1 text-sm text-muted-foreground">Subscription assignments per environment.</p>
@@ -929,6 +1018,14 @@
                 return this.request && (this.isRequester || this.isAdmin);
             },
 
+            get isFirewallRequest() {
+                return this.request && this.request.request_type === 'FIREWALL';
+            },
+
+            get isOnboardingRequest() {
+                return this.request && this.request.request_type === 'ONBOARDING';
+            },
+
             get assignedCount() {
                 if (!this.request || !this.request.environments) return 0;
                 return this.request.environments.filter(env => env.is_assigned).length;
@@ -966,7 +1063,7 @@
             },
 
             initSubscriptionAssignments() {
-                if (!this.request || !this.request.environments) return;
+                if (!this.isOnboardingRequest || !this.request || !this.request.environments) return;
                 this.subscriptionAssignments = {};
                 this.request.environments.forEach(env => {
                     if (!env.is_assigned) {
@@ -1061,6 +1158,18 @@
                     .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
             },
 
+            formatRequestType(type) {
+                if (!type) return 'Request';
+                const mapping = {
+                    'ONBOARDING': 'Onboarding',
+                    'FIREWALL': 'Firewall',
+                    'ORGANIZATION': 'Organization',
+                    'LOB': 'Line of Business',
+                    'SUBSCRIPTION': 'Subscription',
+                };
+                return mapping[type] || type;
+            },
+
             activityTypeClasses(type) {
                 const base = 'bg-muted text-muted-foreground';
                 const variants = {
@@ -1083,6 +1192,31 @@
                     'PENDING': 'bg-amber-400'
                 };
                 return variants[normalized] || 'bg-muted-foreground/50';
+            },
+
+            requestInformationSubtitle() {
+                if (!this.request) {
+                    return 'Request information unavailable.';
+                }
+                if (this.request.request_type === 'FIREWALL') {
+                    return 'Summary of the network access request awaiting review.';
+                }
+                return 'Key attributes associated with this onboarding request.';
+            },
+
+            environmentScopeLabel(scope) {
+                if (!scope) return '';
+                const mapping = {
+                    'DEV': 'Development',
+                    'TEST': 'Test',
+                    'QA': 'Quality Assurance',
+                    'STAGE': 'Staging',
+                    'UAT': 'User Acceptance',
+                    'PROD': 'Production',
+                    'DR': 'Disaster Recovery',
+                };
+                const upper = scope.toUpperCase();
+                return mapping[upper] || upper;
             },
 
             refreshSelectedStage() {

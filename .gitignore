@@ -18,3 +18,4 @@ venv/
 *.tfvars
 !terraform.tfvars
 *.tfstate*
+*lock.hcl*

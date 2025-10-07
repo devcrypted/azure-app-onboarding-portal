@@ -1,0 +1,391 @@
+{% extends "base.html" %}
+{% from "icons.html" import icon_submit, icon_spinner %}
+
+{% block title %}New Firewall Request - TradeX Platform Onboarding{% endblock %}
+
+{% block content %}
+<div x-data="firewallRequestApp()" x-init="init()" class="container mx-auto py-8 px-4">
+    <div class="max-w-5xl mx-auto space-y-6">
+        <div class="flex items-start justify-between gap-6 flex-wrap">
+            <div>
+                <h1 class="text-3xl font-bold tracking-tight">New Firewall Request</h1>
+                <p class="text-muted-foreground mt-2 max-w-2xl">
+                    Submit firewall rules for review by the network administration team. Provide detailed justification and add each rule with its source, destination, and port requirements.
+                </p>
+            </div>
+            <a href="{{ url_for('web.dashboard') }}" class="btn btn-muted">Back to Dashboard</a>
+        </div>
+
+        <!-- Alerts -->
+        <template x-if="errorMessage">
+            <div class="rounded-lg border-2 border-red-400 bg-red-50 dark:bg-red-900/20 p-5" role="alert">
+                <div class="flex items-start gap-3">
+                    <svg class="h-6 w-6 text-red-600" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm.75-11.5a.75.75 0 10-1.5 0v4a.75.75 0 001.5 0v-4zm0 6a.75.75 0 10-1.5 0 .75.75 0 001.5 0z" clip-rule="evenodd" />
+                    </svg>
+                    <div class="space-y-1">
+                        <h3 class="text-sm font-semibold text-red-800">Unable to submit request</h3>
+                        <p class="text-sm text-red-700" x-text="errorMessage"></p>
+                        <template x-if="duplicates.length">
+                            <div class="mt-3 text-xs text-red-700 space-y-2">
+                                <p class="font-semibold">Potential duplicate rules detected:</p>
+                                <ul class="list-disc list-inside space-y-1">
+                                    <template x-for="duplicate in duplicates" :key="duplicate.rule.id">
+                                        <li>
+                                            <span class="font-medium" x-text="duplicate.rule.source"></span>
+                                            →
+                                            <span class="font-medium" x-text="duplicate.rule.destination"></span>
+                                            (ports <span x-text="duplicate.rule.ports.join(', ')"></span>,
+                                            <span x-text="duplicate.rule.protocol"></span>,
+                                            <span x-text="duplicate.rule.direction"></span>) existing in request
+                                            <a class="underline" :href="`/requests/${duplicate.existing_request.app_id}`" x-text="duplicate.existing_request.app_id"></a>
+                                        </li>
+                                    </template>
+                                </ul>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <template x-if="successMessage">
+            <div class="rounded-lg border border-green-300 bg-green-50 p-4" role="alert">
+                <div class="flex items-start gap-3">
+                    <svg class="h-5 w-5 text-green-500" viewBox="0 0 20 20" fill="currentColor">
+                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.857-10.809a.75.75 0 10-1.214-.882l-3.54 4.866-1.773-1.773a.75.75 0 10-1.06 1.06l2.5 2.5a.75.75 0 001.14-.067l4-5.5z" clip-rule="evenodd" />
+                    </svg>
+                    <div>
+                        <p class="text-sm font-medium text-green-800" x-text="successMessage"></p>
+                        <a class="text-sm text-primary underline mt-1 block" :href="redirectUrl">View request details</a>
+                    </div>
+                </div>
+            </div>
+        </template>
+
+        <form @submit.prevent="submitRequest" class="space-y-8">
+            <!-- Request metadata -->
+            <div class="card">
+                <div class="p-6 space-y-6">
+                    <div class="flex items-center justify-between flex-wrap gap-4">
+                        <h2 class="text-xl font-semibold">Request Details</h2>
+                        <span class="text-xs uppercase tracking-wide text-muted-foreground">Requested by {{ user_email }}</span>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Application Name *</label>
+                            <input type="text" x-model="form.application_name" required class="input w-full" placeholder="e.g., TradeX Orders Portal" />
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Destination Service *</label>
+                            <input type="text" x-model="form.destination_service" required class="input w-full" placeholder="e.g., Azure Firewall / Private Endpoint" />
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Organization *</label>
+                            <select x-model="form.organization" required class="input w-full">
+                                <option value="">Select Organization</option>
+                                <template x-for="org in lookupData.Organization" :key="org.id">
+                                    <option :value="org.value" x-text="org.value"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Line of Business *</label>
+                            <select x-model="form.lob" required class="input w-full">
+                                <option value="">Select LOB</option>
+                                <template x-for="lob in lookupData.LOB" :key="lob.id">
+                                    <option :value="lob.value" x-text="lob.value"></option>
+                                </template>
+                            </select>
+                        </div>
+                        <div class="space-y-2 md:col-span-2">
+                            <label class="block text-sm font-medium">Environment Scopes *</label>
+                            <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                <template x-for="option in environmentScopeOptions" :key="option.value">
+                                    <label class="flex items-center gap-2 rounded-lg border px-3 py-2 cursor-pointer"
+                                           :class="form.environment_scopes.includes(option.value) ? 'border-primary bg-primary/5' : 'border-border'">
+                                        <input type="checkbox" class="checkbox" :value="option.value" @change="toggleEnvironmentScope(option.value)" :checked="form.environment_scopes.includes(option.value)" />
+                                        <div>
+                                            <p class="text-sm font-medium" x-text="option.label"></p>
+                                            <p class="text-xs text-muted-foreground" x-text="option.description"></p>
+                                        </div>
+                                    </label>
+                                </template>
+                            </div>
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Requested Effective Date</label>
+                            <input type="date" x-model="form.requested_effective_date" class="input w-full" />
+                        </div>
+                        <div class="space-y-2">
+                            <label class="block text-sm font-medium">Expiry Date</label>
+                            <input type="date" x-model="form.expires_at" class="input w-full" />
+                        </div>
+                        <div class="space-y-2 md:col-span-2">
+                            <label class="block text-sm font-medium">Business Justification *</label>
+                            <textarea x-model="form.justification" rows="4" required class="input w-full resize-y" placeholder="Provide the business need and impact if the access is not granted."></textarea>
+                        </div>
+                        <div class="space-y-2 md:col-span-2">
+                            <label class="block text-sm font-medium">GitHub PR URL (optional)</label>
+                            <input type="url" x-model="form.github_pr_url" class="input w-full" placeholder="https://github.com/org/repo/pull/123" />
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Firewall rule builder -->
+            <div class="card">
+                <div class="p-6 space-y-6">
+                    <div class="flex items-center justify-between flex-wrap gap-4">
+                        <div>
+                            <h2 class="text-xl font-semibold">Firewall Rules</h2>
+                            <p class="text-muted-foreground text-sm">Add one entry per source/destination combination. Use ranges for contiguous ports.</p>
+                        </div>
+                        <button type="button" class="btn btn-muted" @click="addRule">+ Add Rule</button>
+                    </div>
+
+                    <template x-if="form.rule_entries.length === 0">
+                        <div class="rounded border border-border bg-muted/30 p-6 text-center text-muted-foreground text-sm">
+                            No rules added yet. Use the button above to add your first rule.
+                        </div>
+                    </template>
+
+                    <div class="space-y-4">
+                        <template x-for="(rule, index) in form.rule_entries" :key="index">
+                            <div class="rounded-lg border border-border bg-muted/20 p-5 space-y-4">
+                                <div class="flex items-center justify-between">
+                                    <h3 class="text-base font-semibold">Rule <span x-text="index + 1"></span></h3>
+                                    <button type="button" class="text-sm text-red-600 hover:text-red-700" @click="removeRule(index)" x-show="form.rule_entries.length > 1">Remove</button>
+                                </div>
+                                <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div class="space-y-2">
+                                        <label class="block text-sm font-medium">Source *</label>
+                                        <input type="text" class="input w-full" x-model="rule.source" placeholder="IP, CIDR, or FQDN" required />
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="block text-sm font-medium">Destination *</label>
+                                        <input type="text" class="input w-full" x-model="rule.destination" placeholder="IP, CIDR, or FQDN" required />
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="block text-sm font-medium">Ports *</label>
+                                        <input type="text" class="input w-full" x-model="rule.ports" placeholder="80,443 or 1000-2000" required />
+                                        <p class="text-xs text-muted-foreground">Comma-separated ports or ranges</p>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="block text-sm font-medium">Protocol *</label>
+                                        <select class="input w-full" x-model="rule.protocol">
+                                            <template x-for="protocol in protocolOptions" :key="protocol">
+                                                <option :value="protocol" x-text="protocol"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="block text-sm font-medium">Direction *</label>
+                                        <select class="input w-full" x-model="rule.direction">
+                                            <template x-for="direction in directionOptions" :key="direction">
+                                                <option :value="direction" x-text="direction"></option>
+                                            </template>
+                                        </select>
+                                    </div>
+                                    <div class="space-y-2">
+                                        <label class="block text-sm font-medium">Description</label>
+                                        <input type="text" class="input w-full" x-model="rule.description" placeholder="Purpose of this rule" />
+                                    </div>
+                                </div>
+                            </div>
+                        </template>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Submission Buttons -->
+            <div class="flex flex-col sm:flex-row gap-3 justify-end">
+                <a href="{{ url_for('web.new_request') }}" class="btn btn-muted text-center">Cancel</a>
+                <button type="submit" class="btn btn-primary" :disabled="submitting">
+                    <span x-show="!submitting" class="flex items-center gap-2">
+                        {{ icon_submit() }} Submit for Approval
+                    </span>
+                    <span x-show="submitting" class="flex items-center gap-2">
+                        {{ icon_spinner() }} Submitting...
+                    </span>
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function firewallRequestApp() {
+    return {
+        lookupData: { Organization: [], LOB: [], Environment: [] },
+        environmentScopeOptions: [
+            { value: 'DEV', label: 'Development', description: 'Non-production development environments' },
+            { value: 'TEST', label: 'Test', description: 'QA / automated testing environments' },
+            { value: 'QA', label: 'Quality Assurance', description: 'Formal QA sign-off environments' },
+            { value: 'STAGE', label: 'Staging', description: 'Pre-production staging environments' },
+            { value: 'UAT', label: 'User Acceptance', description: 'User acceptance testing' },
+            { value: 'PROD', label: 'Production', description: 'Production workloads' },
+            { value: 'DR', label: 'Disaster Recovery', description: 'Failover / DR environments' },
+        ],
+        protocolOptions: ['TCP', 'UDP', 'ICMP', 'ESP', 'AH', 'GRE', 'ANY'],
+        directionOptions: ['INBOUND', 'OUTBOUND', 'BIDIRECTIONAL'],
+        form: {
+            application_name: '',
+            organization: '',
+            lob: '',
+            platform: 'Azure',
+            environment_scopes: ['DEV'],
+            destination_service: '',
+            justification: '',
+            requested_effective_date: '',
+            expires_at: '',
+            github_pr_url: '',
+            rule_entries: [
+                {
+                    source: '',
+                    destination: '',
+                    ports: '',
+                    protocol: 'TCP',
+                    direction: 'INBOUND',
+                    description: '',
+                }
+            ],
+        },
+        submitting: false,
+        successMessage: '',
+        errorMessage: '',
+        duplicates: [],
+        redirectUrl: '#',
+
+        async init() {
+            await this.loadLookupData();
+        },
+
+        async loadLookupData() {
+            try {
+                const response = await fetch('/api/lookup');
+                const data = await response.json();
+                this.lookupData = data || { Organization: [], LOB: [], Environment: [] };
+            } catch (error) {
+                console.error('Failed to load lookup data', error);
+            }
+        },
+
+        toggleEnvironmentScope(scope) {
+            const value = scope.toUpperCase();
+            if (this.form.environment_scopes.includes(value)) {
+                this.form.environment_scopes = this.form.environment_scopes.filter(s => s !== value);
+            } else {
+                this.form.environment_scopes.push(value);
+            }
+        },
+
+        addRule() {
+            this.form.rule_entries.push({
+                source: '',
+                destination: '',
+                ports: '',
+                protocol: 'TCP',
+                direction: 'INBOUND',
+                description: '',
+            });
+        },
+
+        removeRule(index) {
+            this.form.rule_entries.splice(index, 1);
+        },
+
+        buildPayload() {
+            return {
+                application_name: this.form.application_name.trim(),
+                organization: this.form.organization.trim(),
+                lob: this.form.lob.trim(),
+                platform: this.form.platform,
+                environment_scopes: this.form.environment_scopes,
+                destination_service: this.form.destination_service.trim(),
+                justification: this.form.justification.trim(),
+                requested_effective_date: this.form.requested_effective_date || null,
+                expires_at: this.form.expires_at || null,
+                github_pr_url: this.form.github_pr_url || null,
+                rule_entries: this.form.rule_entries.map(rule => ({
+                    source: rule.source.trim(),
+                    destination: rule.destination.trim(),
+                    ports: rule.ports.split(',').map(port => port.trim()).filter(Boolean),
+                    protocol: rule.protocol,
+                    direction: rule.direction,
+                    description: rule.description ? rule.description.trim() : null,
+                })),
+            };
+        },
+
+        async submitRequest() {
+            this.errorMessage = '';
+            this.successMessage = '';
+            this.duplicates = [];
+
+            if (this.form.environment_scopes.length === 0) {
+                this.errorMessage = 'Select at least one environment scope.';
+                return;
+            }
+
+            if (this.form.rule_entries.length === 0) {
+                this.errorMessage = 'Add at least one firewall rule before submitting.';
+                return;
+            }
+
+            this.submitting = true;
+            try {
+                const payload = this.buildPayload();
+                const response = await fetch('/api/requests/firewall', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'X-User-Email': '{{ user_email }}',
+                    },
+                    body: JSON.stringify(payload),
+                });
+
+                if (response.ok) {
+                    const data = await response.json();
+                    this.successMessage = 'Firewall request submitted successfully.';
+                    this.redirectUrl = `/requests/${data.app_id}`;
+                    this.resetForm();
+                } else {
+                    const error = await response.json();
+                    this.errorMessage = error.error || 'Failed to submit firewall request.';
+                    this.duplicates = error.duplicates || [];
+                }
+            } catch (error) {
+                console.error('Failed to submit firewall request', error);
+                this.errorMessage = 'Unexpected error occurred while submitting the request.';
+            } finally {
+                this.submitting = false;
+            }
+        },
+
+        resetForm() {
+            this.form.application_name = '';
+            this.form.organization = '';
+            this.form.lob = '';
+            this.form.environment_scopes = ['DEV'];
+            this.form.destination_service = '';
+            this.form.justification = '';
+            this.form.requested_effective_date = '';
+            this.form.expires_at = '';
+            this.form.github_pr_url = '';
+            this.form.rule_entries = [
+                {
+                    source: '',
+                    destination: '',
+                    ports: '',
+                    protocol: 'TCP',
+                    direction: 'INBOUND',
+                    description: '',
+                }
+            ];
+        },
+    };
+}
+</script>
+{% endblock %}

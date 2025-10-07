@@ -43,6 +43,19 @@ class AuthService:
             email.lower() for email in self.settings.admin_emails
         ]
 
+    def is_network_admin(self, user_email: Optional[str] = None) -> bool:
+        """Check if user has network admin privileges."""
+
+        if user_email is None:
+            user_email = self.get_current_user_email()
+
+        if not user_email:
+            return False
+
+        return user_email.lower() in [
+            email.lower() for email in self.settings.network_admin_emails
+        ]
+
     def get_current_user(self) -> Optional[dict]:
         """Get current authenticated user from session.
 

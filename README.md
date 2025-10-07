@@ -8,6 +8,7 @@ Enterprise-grade Flask application for managing platform onboarding requests
 ### Core Capabilities
 
 - **Multi-Request Types**: Application onboarding, firewall rules, organization/LOB management, subscription tracking
+- **Structured Firewall Workflow**: Dedicated rule builder with validation, duplicate detection, and environment scope tracking
 - **Self-Service Portal**: Intuitive web interface for submitting and tracking requests
 - **Admin Workflow**: Approval system with multi-stage pipeline (Draft → Approval → Subscription Assignment → Infrastructure → Handover)
 - **Real-Time Tracking**: Live status updates with timeline visualization
@@ -51,7 +52,7 @@ tradex-platform-onboarding/
 │       ├── login.html           # Authentication page
 │       ├── dashboard.html       # User dashboard
 │       ├── request_form.html    # Onboarding request form
-│       ├── firewall_form.html   # Firewall request form
+│       ├── firewall_request_form.html   # Firewall request workflow
 │       ├── request_detail.html  # Request details with timeline
 │       ├── requests.html        # All requests list
 │       ├── admin.html           # Admin control panel
@@ -111,6 +112,7 @@ DB_TYPE=sqlite
 SQLITE_DB_PATH=instance/tradex.db
 SECRET_KEY=dev-secret-key-change-in-production
 ADMIN_EMAILS=admin@tradexfoods.com
+NETWORK_ADMIN_EMAILS=netadmin@tradexfoods.com
 SQLALCHEMY_ECHO=false
 SESSION_TYPE=filesystem
 PERMANENT_SESSION_LIFETIME=3600
@@ -170,6 +172,12 @@ Only users with emails in this list can:
 - See the "Admin" navigation link
 - Access `/admin` and `/admin/lookup` pages
 - Approve/reject onboarding requests
+
+### Network Admin Access
+
+Network-specific actions (firewall approvals, networking PR reviews) require the
+`NETWORK_ADMIN_EMAILS` list. Only users defined here can approve firewall requests
+and manage rule deployments.
 
 ## Database Schema
 

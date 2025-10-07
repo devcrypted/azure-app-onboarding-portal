@@ -115,6 +115,7 @@ class Application(db.Model):
 
     def to_dict(self):
         """Convert model to dictionary."""
+        firewall_details = getattr(self, "firewall_details", None)
         return {
             "id": self.id,
             "app_code": self.app_code,
@@ -126,6 +127,7 @@ class Application(db.Model):
                 self.onboarding_date.isoformat() if self.onboarding_date else None
             ),
             "platform": self.platform,
+            "request_type": self.request_type.value,
             "status": self.status.value,
             "current_stage": self.current_stage.value,
             "requested_by": self.requested_by,
@@ -149,6 +151,9 @@ class Application(db.Model):
             "environments": [env.to_dict() for env in self.environments],  # type: ignore
             "comments": [comment.to_dict() for comment in self.comments],  # type: ignore
             "timeline": [event.to_dict() for event in self.timeline],  # type: ignore
+            "firewall_details": (
+                firewall_details.to_dict() if firewall_details else None
+            ),
         }
 
 
@@ -298,7 +303,7 @@ class RequestTimeline(db.Model):
 
 
 class FirewallRequest(db.Model):
-    """Firewall request model - specific details for firewall rule requests."""
+    """Firewall request model - captures structured firewall rule submissions."""
 
     __tablename__ = "firewall_requests"
 
@@ -306,21 +311,41 @@ class FirewallRequest(db.Model):
     app_id = db.Column(
         db.Integer, db.ForeignKey("applications.id"), nullable=False, unique=True
     )
-    source_ip_ranges = db.Column(db.Text, nullable=False)  # JSON array of IP ranges
-    destination_ip_ranges = db.Column(
+    environment_scopes = db.Column(
         db.Text, nullable=False
-    )  # JSON array of IP ranges
-    ports = db.Column(db.Text, nullable=False)  # JSON array of ports
-    protocols = db.Column(db.Text, nullable=False)  # JSON array (TCP, UDP, ICMP, etc.)
+    )  # JSON array of requested environment scopes
+    destination_service = db.Column(db.String(200), nullable=False)
     justification = db.Column(db.Text, nullable=False)
+    requested_effective_date = db.Column(db.Date, nullable=True)
+    expires_at = db.Column(db.Date, nullable=True)
+    github_pr_url = db.Column(db.String(500), nullable=True)
+    duplicate_of_request_id = db.Column(
+        db.Integer, db.ForeignKey("firewall_requests.id"), nullable=True
+    )
+    duplicate_hash = db.Column(db.String(128), nullable=True, index=True)
+    application_name_at_submission = db.Column(db.String(200), nullable=False)
+    organization_at_submission = db.Column(db.String(100), nullable=True)
+    lob_at_submission = db.Column(db.String(100), nullable=True)
+    requester_email_at_submission = db.Column(db.String(200), nullable=False)
+    network_admin_approver = db.Column(db.String(200), nullable=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
     updated_at = db.Column(
         db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
     )
 
-    # Relationship
+    # Relationships
     application = db.relationship(
         "Application", backref="firewall_details", uselist=False
+    )
+    duplicate_of = db.relationship(
+        "FirewallRequest", remote_side=[id], backref="duplicates", uselist=False
+    )
+    rule_entries = db.relationship(
+        "FirewallRuleEntry",
+        backref="firewall_request",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="FirewallRuleEntry.id",
     )
 
     def to_dict(self):
@@ -330,13 +355,60 @@ class FirewallRequest(db.Model):
         return {
             "id": self.id,
             "app_id": self.app_id,
-            "source_ip_ranges": json.loads(self.source_ip_ranges),
-            "destination_ip_ranges": json.loads(self.destination_ip_ranges),
-            "ports": json.loads(self.ports),
-            "protocols": json.loads(self.protocols),
+            "environment_scopes": json.loads(self.environment_scopes),
+            "destination_service": self.destination_service,
             "justification": self.justification,
+            "requested_effective_date": (
+                self.requested_effective_date.isoformat()
+                if self.requested_effective_date
+                else None
+            ),
+            "expires_at": self.expires_at.isoformat() if self.expires_at else None,
+            "github_pr_url": self.github_pr_url,
+            "duplicate_of_request_id": self.duplicate_of_request_id,
+            "duplicate_hash": self.duplicate_hash,
+            "application_name_at_submission": self.application_name_at_submission,
+            "organization_at_submission": self.organization_at_submission,
+            "lob_at_submission": self.lob_at_submission,
+            "requester_email_at_submission": self.requester_email_at_submission,
+            "network_admin_approver": self.network_admin_approver,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "rule_entries": [entry.to_dict() for entry in self.rule_entries],
+        }
+
+
+class FirewallRuleEntry(db.Model):
+    """Individual firewall rule entry belonging to a firewall request."""
+
+    __tablename__ = "firewall_rule_entries"
+
+    id = db.Column(db.Integer, primary_key=True)
+    firewall_request_id = db.Column(
+        db.Integer, db.ForeignKey("firewall_requests.id"), nullable=False, index=True
+    )
+    source = db.Column(db.String(255), nullable=False)
+    destination = db.Column(db.String(255), nullable=False)
+    ports = db.Column(db.String(120), nullable=False)
+    protocol = db.Column(db.String(20), nullable=False)
+    direction = db.Column(db.String(20), nullable=False)
+    description = db.Column(db.String(500), nullable=True)
+    duplicate_key = db.Column(db.String(128), nullable=False, index=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+
+    def to_dict(self):
+        """Convert model to dictionary."""
+        return {
+            "id": self.id,
+            "firewall_request_id": self.firewall_request_id,
+            "source": self.source,
+            "destination": self.destination,
+            "ports": self.ports.split("|"),
+            "protocol": self.protocol,
+            "direction": self.direction,
+            "description": self.description,
+            "duplicate_key": self.duplicate_key,
+            "created_at": self.created_at.isoformat(),
         }
 
 

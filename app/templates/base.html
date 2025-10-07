@@ -469,6 +469,15 @@
                         {% if is_admin %}
                         <span class="badge bg-primary/10 text-primary text-xs font-semibold px-2 py-1">ADMIN</span>
                         {% endif %}
+                        {% if is_network_admin and not is_admin %}
+                        <span class="badge bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-semibold px-2 py-1">
+                            NETWORK ADMIN
+                        </span>
+                        {% elif is_network_admin and is_admin %}
+                        <span class="badge bg-emerald-100 text-emerald-700 border border-emerald-300 text-xs font-semibold px-2 py-1">
+                            NET-ADMIN
+                        </span>
+                        {% endif %}
                     </div>
                     <!-- Theme Toggle Button -->
                     <button onclick="toggleTheme()" class="btn btn-icon h-9 w-9 p-0 flex items-center justify-center"

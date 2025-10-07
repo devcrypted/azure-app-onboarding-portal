@@ -96,6 +96,13 @@ class AppSettings(BaseSettings):
     admin_emails_raw: Optional[str] = Field(default=None, alias="ADMIN_EMAILS")
     _admin_emails: list[str] = PrivateAttr(default_factory=lambda: ["admin@tradex.com"])
 
+    network_admin_emails_raw: Optional[str] = Field(
+        default=None, alias="NETWORK_ADMIN_EMAILS"
+    )
+    _network_admin_emails: list[str] = PrivateAttr(
+        default_factory=lambda: ["netadmin@tradex.com"]
+    )
+
     db_type: Literal["sqlite", "mssql"] = Field(default="sqlite", alias="DB_TYPE")
     sqlalchemy_database_uri_override: Optional[str] = Field(
         default=None, alias="SQLALCHEMY_DATABASE_URI"
@@ -144,6 +151,18 @@ class AppSettings(BaseSettings):
         self._admin_emails = parsed or default_emails
         return self
 
+    @model_validator(mode="after")
+    def populate_network_admin_emails(self) -> "AppSettings":
+        raw = self.network_admin_emails_raw
+        default_emails = ["admin@tradex.com"]
+        if raw is None:
+            self._network_admin_emails = default_emails
+            return self
+
+        parsed = self._parse_admin_emails(raw)
+        self._network_admin_emails = parsed or default_emails
+        return self
+
     @field_validator("sqlalchemy_echo", mode="before")
     @classmethod
     def cast_sqlalchemy_echo(cls, value: object) -> bool:
@@ -179,6 +198,10 @@ class AppSettings(BaseSettings):
     @property
     def admin_emails(self) -> list[str]:
         return list(self._admin_emails)
+
+    @property
+    def network_admin_emails(self) -> list[str]:
+        return list(self._network_admin_emails)
 
     @property
     def sqlalchemy_database_uri(self) -> str:
@@ -359,6 +382,6 @@ class AppSettings(BaseSettings):
             "SESSION_TYPE": self.session_type,
             "PERMANENT_SESSION_LIFETIME": self.permanent_session_lifetime,
             "ADMIN_EMAILS": self.admin_emails,
+            "NETWORK_ADMIN_EMAILS": self.network_admin_emails,
             "WORKFLOW_CONFIG": self.workflow_config,
         }
-

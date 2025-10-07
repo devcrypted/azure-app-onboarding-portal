@@ -24,11 +24,20 @@ def is_admin():
     return user_email in current_app.config.get("ADMIN_EMAILS", [])
 
 
+def is_network_admin():
+    """Check if current user is a network admin."""
+    if not is_authenticated():
+        return False
+    user_email = get_current_user()
+    return user_email in current_app.config.get("NETWORK_ADMIN_EMAILS", [])
+
+
 @web_bp.context_processor
 def inject_user_info():
     """Make user info available to all templates."""
     return {
         "is_admin": is_admin(),
+        "is_network_admin": is_network_admin(),
         "user_email": get_current_user() if is_authenticated() else None,
     }
 
@@ -115,7 +124,7 @@ def new_firewall_request():
     if not is_authenticated():
         return redirect(url_for("web.login"))
 
-    return render_template("request_form.html", request_type="firewall")
+    return render_template("firewall_request_form.html")
 
 
 @web_bp.route("/requests/new/organization")
