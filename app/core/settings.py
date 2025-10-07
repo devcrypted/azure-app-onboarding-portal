@@ -100,7 +100,7 @@ class AppSettings(BaseSettings):
     sqlalchemy_database_uri_override: Optional[str] = Field(
         default=None, alias="SQLALCHEMY_DATABASE_URI"
     )
-    sqlite_db_path: str = Field(default="instance/tradex.db", alias="SQLITE_DB_PATH")
+    sqlite_db_path: str = Field(default="/home/tradex.db", alias="SQLITE_DB_PATH")
     mssql_server: Optional[str] = Field(default=None, alias="MSSQL_SERVER")
     mssql_database: Optional[str] = Field(default=None, alias="MSSQL_DATABASE")
     mssql_username: Optional[str] = Field(default=None, alias="MSSQL_USERNAME")
@@ -361,3 +361,4 @@ class AppSettings(BaseSettings):
             "ADMIN_EMAILS": self.admin_emails,
             "WORKFLOW_CONFIG": self.workflow_config,
         }
+
