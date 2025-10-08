@@ -12,6 +12,9 @@ from flask_cors import CORS
 from app.core import get_settings
 from app.models import db
 
+# Load workflow registry definitions on startup
+import app.workflows  # noqa: F401
+
 # Load environment variables from .env file
 env_path = Path(__file__).parent.parent / ".env"
 load_dotenv(env_path)

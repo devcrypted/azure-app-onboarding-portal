@@ -124,7 +124,7 @@ def new_firewall_request():
     if not is_authenticated():
         return redirect(url_for("web.login"))
 
-    return render_template("firewall_request_form.html")
+    return render_template("firewall_request_form_v2.html")
 
 
 @web_bp.route("/requests/new/organization")

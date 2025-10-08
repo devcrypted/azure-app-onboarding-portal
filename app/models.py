@@ -48,6 +48,9 @@ class WorkflowStage(str, enum.Enum):
     SUBSCRIPTION_ASSIGNMENT = "SUBSCRIPTION_ASSIGNMENT"
     FOUNDATION_INFRA = "FOUNDATION_INFRA"
     INFRASTRUCTURE = "INFRASTRUCTURE"
+    NETWORK_REVIEW = "NETWORK_REVIEW"
+    RULE_COLLECTION_BUILD = "RULE_COLLECTION_BUILD"
+    RULE_DEPLOYMENT = "RULE_DEPLOYMENT"
     HANDOVER = "HANDOVER"
     REJECTED = "REJECTED"
     CANCELLED = "CANCELLED"
@@ -311,6 +314,12 @@ class FirewallRequest(db.Model):
     app_id = db.Column(
         db.Integer, db.ForeignKey("applications.id"), nullable=False, unique=True
     )
+    source_application_id = db.Column(
+        db.Integer, db.ForeignKey("applications.id"), nullable=True
+    )
+    collection_name = db.Column(db.String(120), nullable=False)
+    collection_document = db.Column(db.Text, nullable=True)
+    ip_groups = db.Column(db.Text, nullable=True)
     environment_scopes = db.Column(
         db.Text, nullable=False
     )  # JSON array of requested environment scopes
@@ -335,10 +344,25 @@ class FirewallRequest(db.Model):
 
     # Relationships
     application = db.relationship(
-        "Application", backref="firewall_details", uselist=False
+        "Application",
+        foreign_keys=[app_id],
+        backref="firewall_details",
+        uselist=False,
+    )
+    source_application = db.relationship(
+        "Application",
+        foreign_keys=[source_application_id],
+        backref="linked_firewall_requests",
     )
     duplicate_of = db.relationship(
         "FirewallRequest", remote_side=[id], backref="duplicates", uselist=False
+    )
+    rule_collections = db.relationship(
+        "FirewallRuleCollection",
+        backref="firewall_request",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="FirewallRuleCollection.priority",
     )
     rule_entries = db.relationship(
         "FirewallRuleEntry",
@@ -355,6 +379,9 @@ class FirewallRequest(db.Model):
         return {
             "id": self.id,
             "app_id": self.app_id,
+            "source_application_id": self.source_application_id,
+            "collection_name": self.collection_name,
+            "collection_document": self.collection_document,
             "environment_scopes": json.loads(self.environment_scopes),
             "destination_service": self.destination_service,
             "justification": self.justification,
@@ -374,7 +401,49 @@ class FirewallRequest(db.Model):
             "network_admin_approver": self.network_admin_approver,
             "created_at": self.created_at.isoformat(),
             "updated_at": self.updated_at.isoformat(),
+            "ip_groups": json.loads(self.ip_groups) if self.ip_groups else {},
             "rule_entries": [entry.to_dict() for entry in self.rule_entries],
+            "rule_collections": [
+                collection.to_dict() for collection in self.rule_collections
+            ],
+        }
+
+
+class FirewallRuleCollection(db.Model):
+    """Grouping for firewall rules sharing type, action, and priority."""
+
+    __tablename__ = "firewall_rule_collections"
+
+    id = db.Column(db.Integer, primary_key=True)
+    firewall_request_id = db.Column(
+        db.Integer,
+        db.ForeignKey("firewall_requests.id"),
+        nullable=False,
+        index=True,
+    )
+    collection_type = db.Column(db.String(20), nullable=False)
+    action = db.Column(db.String(20), nullable=False)
+    priority = db.Column(db.Integer, nullable=False)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
+    updated_at = db.Column(
+        db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow, nullable=False
+    )
+
+    rule_entries = db.relationship(
+        "FirewallRuleEntry",
+        backref="rule_collection",
+        lazy=True,
+        cascade="all, delete-orphan",
+        order_by="FirewallRuleEntry.id",
+    )
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "collection_type": self.collection_type,
+            "action": self.action,
+            "priority": self.priority,
+            "rules": [entry.to_dict() for entry in self.rule_entries],
         }
 
 
@@ -387,26 +456,73 @@ class FirewallRuleEntry(db.Model):
     firewall_request_id = db.Column(
         db.Integer, db.ForeignKey("firewall_requests.id"), nullable=False, index=True
     )
-    source = db.Column(db.String(255), nullable=False)
-    destination = db.Column(db.String(255), nullable=False)
-    ports = db.Column(db.String(120), nullable=False)
-    protocol = db.Column(db.String(20), nullable=False)
-    direction = db.Column(db.String(20), nullable=False)
+    rule_collection_id = db.Column(
+        db.Integer,
+        db.ForeignKey("firewall_rule_collections.id"),
+        nullable=False,
+        index=True,
+    )
+    name = db.Column(db.String(128), nullable=False)
+    ritm_number = db.Column(db.String(64), nullable=True)
     description = db.Column(db.String(500), nullable=True)
+    collection_type = db.Column(db.String(20), nullable=False, default="NETWORK")
+    source = db.Column(db.String(255), nullable=True)
+    destination = db.Column(db.String(255), nullable=True)
+    ports = db.Column(db.String(200), nullable=True)
+    protocol = db.Column(db.String(20), nullable=True)
+    direction = db.Column(db.String(20), nullable=True)
+    protocols = db.Column(db.Text, nullable=False)
+    source_addresses = db.Column(db.Text, nullable=False)
+    source_ip_groups = db.Column(db.Text, nullable=True)
+    destination_addresses = db.Column(db.Text, nullable=True)
+    destination_ip_addresses = db.Column(db.Text, nullable=True)
+    destination_ip_groups = db.Column(db.Text, nullable=True)
+    destination_fqdns = db.Column(db.Text, nullable=True)
+    destination_ports = db.Column(db.Text, nullable=True)
+    destination_address = db.Column(db.String(255), nullable=True)
+    translated_address = db.Column(db.String(255), nullable=True)
+    translated_port = db.Column(db.String(50), nullable=True)
+    target_fqdns = db.Column(db.Text, nullable=True)
+    rule_metadata = db.Column("metadata", db.Text, nullable=True)
     duplicate_key = db.Column(db.String(128), nullable=False, index=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow, nullable=False)
 
     def to_dict(self):
         """Convert model to dictionary."""
+        import json
+
+        def _loads(value, default):
+            try:
+                return json.loads(value) if value else default
+            except (TypeError, ValueError):
+                return default
+
         return {
             "id": self.id,
             "firewall_request_id": self.firewall_request_id,
+            "rule_collection_id": self.rule_collection_id,
+            "name": self.name,
+            "ritm_number": self.ritm_number,
+            "description": self.description,
             "source": self.source,
             "destination": self.destination,
-            "ports": self.ports.split("|"),
+            "ports": self.ports.split("|") if self.ports else [],
             "protocol": self.protocol,
             "direction": self.direction,
-            "description": self.description,
+            "collection_type": self.collection_type,
+            "protocols": _loads(self.protocols, []),
+            "source_addresses": _loads(self.source_addresses, []),
+            "source_ip_groups": _loads(self.source_ip_groups, []),
+            "destination_addresses": _loads(self.destination_addresses, []),
+            "destination_ip_addresses": _loads(self.destination_ip_addresses, []),
+            "destination_ip_groups": _loads(self.destination_ip_groups, []),
+            "destination_fqdns": _loads(self.destination_fqdns, []),
+            "destination_ports": _loads(self.destination_ports, []),
+            "destination_address": self.destination_address,
+            "translated_address": self.translated_address,
+            "translated_port": self.translated_port,
+            "target_fqdns": _loads(self.target_fqdns, []),
+            "metadata": _loads(self.rule_metadata, {}),
             "duplicate_key": self.duplicate_key,
             "created_at": self.created_at.isoformat(),
         }

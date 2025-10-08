@@ -4,18 +4,32 @@ from __future__ import annotations
 
 import hashlib
 import json
-from typing import List, Optional, Sequence
+from typing import Dict, List, Optional, Sequence, Tuple, Union, cast
 
 from flask_sqlalchemy import SQLAlchemy
 
-from app.models import FirewallRequest, FirewallRuleEntry, RequestType, WorkflowStage
+from app.models import (
+    FirewallRequest,
+    FirewallRuleCollection,
+    FirewallRuleEntry,
+    RequestType,
+    WorkflowStage,
+)
 from app.repositories import (
     AuditRepository,
     FirewallRequestRepository,
     TimelineRepository,
 )
 from app.services.application_service import ApplicationService
-from app.schemas import FirewallRequestCreate, FirewallRuleEntryInput
+from app.schemas import (
+    ApplicationRuleGroupInput,
+    ApplicationRuleInput,
+    FirewallRequestCreate,
+    NatRuleGroupInput,
+    NatRuleInput,
+    NetworkRuleGroupInput,
+    NetworkRuleInput,
+)
 
 
 class DuplicateFirewallRuleError(Exception):
@@ -28,6 +42,13 @@ class DuplicateFirewallRuleError(Exception):
 
 class FirewallRequestService:
     """Business logic for firewall request submissions."""
+
+    PRIORITY_BASELINE = {
+        "APPLICATION": 400,
+        "NETWORK": 6500,
+        "NAT": 100,
+    }
+    PRIORITY_INCREMENT = 100
 
     def __init__(self, db: SQLAlchemy) -> None:
         self.db = db
@@ -53,9 +74,13 @@ class FirewallRequestService:
     ) -> FirewallRequest:
         """Create a firewall request along with its rule entries."""
 
+        rule_groups = self._iter_groups(payload)
         duplicate_keys = [
-            self._build_duplicate_key(rule) for rule in payload.rule_entries
+            self._build_duplicate_key(collection_type, rule)
+            for collection_type, group in rule_groups
+            for rule in group.rules
         ]
+
         duplicates = self.firewall_repo.find_duplicates(duplicate_keys)
 
         if duplicates:
@@ -73,12 +98,33 @@ class FirewallRequestService:
             ]
             raise DuplicateFirewallRuleError(duplicate_payload)
 
+        source_application = self.application_service.get_application(
+            payload.source_application_id
+        )
+        if not source_application:
+            raise ValueError(
+                f"Application {payload.source_application_id} not found for firewall request"
+            )
+        if source_application.request_type != RequestType.ONBOARDING:
+            raise ValueError("Firewall requests must target an onboarding application")
+
+        available_scopes = {
+            env.environment_name.strip().upper()
+            for env in source_application.environments
+        }
+        invalid_scopes = set(payload.environment_scopes) - available_scopes
+        if invalid_scopes:
+            raise ValueError(
+                "Environment scopes must match the application's environments; "
+                f"invalid: {', '.join(sorted(invalid_scopes))}"
+            )
+
         app_payload = {
             "request_type": RequestType.FIREWALL,
-            "application_name": payload.application_name,
-            "organization": payload.organization,
-            "lob": payload.lob,
-            "platform": payload.platform,
+            "application_name": source_application.application_name,
+            "organization": source_application.organization,
+            "lob": source_application.lob,
+            "platform": source_application.platform,
             "save_as_draft": False,
         }
 
@@ -90,6 +136,9 @@ class FirewallRequestService:
 
         firewall_request = FirewallRequest(
             app_id=application.id,
+            source_application_id=source_application.id,
+            collection_name=payload.collection_name,
+            ip_groups=json.dumps(payload.ip_groups or {}),
             environment_scopes=json.dumps(payload.environment_scopes),
             destination_service=payload.destination_service,
             justification=payload.justification,
@@ -97,33 +146,54 @@ class FirewallRequestService:
             expires_at=payload.expires_at,
             github_pr_url=payload.github_pr_url,
             duplicate_hash=self._build_request_hash(duplicate_keys),
-            application_name_at_submission=application.application_name,
-            organization_at_submission=application.organization,
-            lob_at_submission=application.lob,
+            application_name_at_submission=source_application.application_name,
+            organization_at_submission=source_application.organization,
+            lob_at_submission=source_application.lob,
             requester_email_at_submission=application.requested_by,
         )
 
-        for rule, duplicate_key in zip(payload.rule_entries, duplicate_keys):
-            normalized_ports = self._normalise_ports(rule.ports)
-            entry = FirewallRuleEntry(
-                source=rule.source,
-                destination=rule.destination,
-                ports="|".join(normalized_ports),
-                protocol=rule.protocol,
-                direction=rule.direction,
-                description=rule.description,
-                duplicate_key=duplicate_key,
-            )
-            firewall_request.rule_entries.append(entry)
-
         self.firewall_repo.add(firewall_request)
+
+        collections_by_type: Dict[str, FirewallRuleCollection] = {}
+        for collection_type, group in rule_groups:
+            collection = collections_by_type.get(collection_type)
+            if collection is None:
+                priority = self._determine_priority(
+                    source_application_id=source_application.id,
+                    collection_type=collection_type,
+                    requested_priority=group.priority,
+                )
+                collection = FirewallRuleCollection(
+                    collection_type=collection_type,
+                    action=group.action,
+                    priority=priority,
+                )
+                firewall_request.rule_collections.append(collection)
+                collections_by_type[collection_type] = collection
+
+            for rule in group.rules:
+                duplicate_key = self._build_duplicate_key(collection_type, rule)
+                entry = self._build_rule_entry(
+                    request=firewall_request,
+                    collection=collection,
+                    collection_type=collection_type,
+                    rule=rule,
+                    duplicate_key=duplicate_key,
+                )
+                collection.rule_entries.append(entry)
+
+        firewall_request.collection_document = json.dumps(
+            self._build_collection_document(firewall_request), indent=4
+        )
+
+        total_rules = len(duplicate_keys)
 
         self.audit_repo.create(
             request_type="CREATE",
             app_id=application.id,
             user_email=requested_by,
             action=f"Created firewall request {application.app_code}",
-            details=f"Submitted {len(payload.rule_entries)} firewall rule(s)",
+            details=f"Submitted {total_rules} firewall rule(s)",
             ip_address=ip_address,
         )
 
@@ -139,25 +209,346 @@ class FirewallRequestService:
 
         return firewall_request
 
-    @staticmethod
-    def _normalise_ports(ports: Sequence[str]) -> List[str]:
-        normalised: List[str] = []
-        for port in ports:
-            parts = [
-                segment.strip() for segment in str(port).split(",") if segment.strip()
+    def _iter_groups(self, payload: FirewallRequestCreate) -> List[
+        Tuple[
+            str,
+            Union[ApplicationRuleGroupInput, NetworkRuleGroupInput, NatRuleGroupInput],
+        ]
+    ]:
+        groups: List[
+            Tuple[
+                str,
+                Union[
+                    ApplicationRuleGroupInput,
+                    NetworkRuleGroupInput,
+                    NatRuleGroupInput,
+                ],
             ]
-            normalised.extend(parts)
-        return sorted({p for p in normalised})
+        ] = []
+
+        if payload.application_rules:
+            groups.append(("APPLICATION", payload.application_rules))
+        if payload.network_rules:
+            groups.append(("NETWORK", payload.network_rules))
+        if payload.nat_rules:
+            groups.append(("NAT", payload.nat_rules))
+        return groups
+
+    def _determine_priority(
+        self,
+        *,
+        source_application_id: int,
+        collection_type: str,
+        requested_priority: Optional[int],
+    ) -> int:
+        if requested_priority is not None:
+            return requested_priority
+
+        existing_priority = self.firewall_repo.get_max_priority_for_source(
+            source_application_id, collection_type
+        )
+
+        if existing_priority is None:
+            return self.PRIORITY_BASELINE.get(collection_type, 100)
+
+        next_priority = existing_priority + self.PRIORITY_INCREMENT
+        return min(65000, next_priority)
+
+    def _build_rule_entry(
+        self,
+        *,
+        request: FirewallRequest,
+        collection: FirewallRuleCollection,
+        collection_type: str,
+        rule: Union[ApplicationRuleInput, NetworkRuleInput, NatRuleInput],
+        duplicate_key: str,
+    ) -> FirewallRuleEntry:
+        translated_address: Optional[str] = None
+        translated_port_value: Optional[str] = None
+        destination_address_column: Optional[str] = None
+
+        if collection_type == "APPLICATION":
+            app_rule = cast(ApplicationRuleInput, rule)
+            protocols_json = json.dumps(
+                [
+                    {"port": protocol.port, "type": protocol.type}
+                    for protocol in app_rule.protocols
+                ]
+            )
+            source_addresses = json.dumps(app_rule.source_ip_addresses)
+            source_ip_groups = json.dumps(app_rule.source_ip_groups)
+            destination_addresses = json.dumps(app_rule.destination_addresses)
+            destination_fqdns = json.dumps(app_rule.destination_fqdns)
+            destination_ports = json.dumps(
+                [str(protocol.port) for protocol in app_rule.protocols]
+            )
+            metadata = json.dumps({"rule_type": "application"})
+            ports_value = "|".join(
+                str(protocol.port) for protocol in app_rule.protocols
+            )
+            protocol_value = "APPLICATION"
+            direction_value = None
+            destination_ip_addresses = json.dumps([])
+            destination_ip_groups = json.dumps([])
+            destination_address_column = None
+            target_fqdns = destination_fqdns
+            source_list = app_rule.source_ip_addresses
+            destination_value = (
+                app_rule.destination_addresses[0]
+                if app_rule.destination_addresses
+                else (
+                    app_rule.destination_fqdns[0]
+                    if app_rule.destination_fqdns
+                    else None
+                )
+            )
+        elif collection_type == "NETWORK":
+            network_rule = cast(NetworkRuleInput, rule)
+            protocols_json = json.dumps(network_rule.protocols)
+            source_addresses = json.dumps(network_rule.source_ip_addresses)
+            source_ip_groups = json.dumps(network_rule.source_ip_groups)
+            destination_addresses = json.dumps([])
+            destination_ip_addresses = json.dumps(network_rule.destination_ip_addresses)
+            destination_ip_groups = json.dumps(network_rule.destination_ip_groups)
+            destination_fqdns = json.dumps(network_rule.destination_fqdns)
+            destination_ports = json.dumps(network_rule.destination_ports)
+            metadata = json.dumps({"rule_type": "network"})
+            ports_value = "|".join(network_rule.destination_ports)
+            protocol_value = "|".join(network_rule.protocols)
+            direction_value = "BIDIRECTIONAL"
+            destination_address_column = None
+            target_fqdns = destination_fqdns
+            source_list = network_rule.source_ip_addresses
+            destination_value = (
+                network_rule.destination_ip_addresses[0]
+                if network_rule.destination_ip_addresses
+                else (
+                    network_rule.destination_fqdns[0]
+                    if network_rule.destination_fqdns
+                    else None
+                )
+            )
+        else:  # NAT
+            nat_rule = cast(NatRuleInput, rule)
+            protocols_json = json.dumps(nat_rule.protocols)
+            source_addresses = json.dumps(nat_rule.source_ip_addresses)
+            source_ip_groups = json.dumps(nat_rule.source_ip_groups)
+            destination_addresses = json.dumps([nat_rule.destination_address])
+            destination_ip_addresses = json.dumps([])
+            destination_ip_groups = json.dumps([])
+            destination_fqdns = json.dumps([])
+            destination_ports = json.dumps(nat_rule.destination_ports)
+            metadata = json.dumps({"rule_type": "nat"})
+            ports_value = "|".join(nat_rule.destination_ports)
+            protocol_value = "|".join(nat_rule.protocols)
+            direction_value = "INBOUND"
+            destination_address_column = nat_rule.destination_address
+            target_fqdns = json.dumps([])
+            source_list = nat_rule.source_ip_addresses
+            destination_value = nat_rule.destination_address
+            translated_address = nat_rule.translated_address
+            translated_port_value = str(nat_rule.translated_port)
+
+        entry = FirewallRuleEntry(
+            firewall_request=request,
+            rule_collection=collection,
+            collection_type=collection_type,
+            name=rule.name,
+            ritm_number=getattr(rule, "ritm_number", None),
+            description=rule.description,
+            source=source_list[0] if source_list else None,
+            destination=destination_value,
+            ports=ports_value or None,
+            protocol=protocol_value or None,
+            direction=direction_value,
+            protocols=protocols_json,
+            source_addresses=source_addresses,
+            source_ip_groups=source_ip_groups,
+            destination_addresses=destination_addresses,
+            destination_ip_addresses=destination_ip_addresses,
+            destination_ip_groups=destination_ip_groups,
+            destination_fqdns=destination_fqdns,
+            destination_ports=destination_ports,
+            destination_address=destination_address_column,
+            translated_port=translated_port_value,
+            translated_address=translated_address,
+            target_fqdns=target_fqdns,
+            rule_metadata=metadata,
+            duplicate_key=duplicate_key,
+        )
+        return entry
+
+    def _format_rule_for_document(
+        self, collection_type: str, entry: FirewallRuleEntry
+    ) -> Dict[str, object]:
+        protocols = json.loads(entry.protocols) if entry.protocols else []
+        source_addresses = (
+            json.loads(entry.source_addresses) if entry.source_addresses else []
+        )
+        source_ip_groups = (
+            json.loads(entry.source_ip_groups) if entry.source_ip_groups else []
+        )
+        destination_addresses = (
+            json.loads(entry.destination_addresses)
+            if entry.destination_addresses
+            else []
+        )
+        destination_ip_addresses = (
+            json.loads(entry.destination_ip_addresses)
+            if entry.destination_ip_addresses
+            else []
+        )
+        destination_ip_groups = (
+            json.loads(entry.destination_ip_groups)
+            if entry.destination_ip_groups
+            else []
+        )
+        destination_fqdns = (
+            json.loads(entry.destination_fqdns) if entry.destination_fqdns else []
+        )
+        destination_ports = (
+            json.loads(entry.destination_ports) if entry.destination_ports else []
+        )
+
+        base_rule = {
+            "name": entry.name,
+            "ritm_number": entry.ritm_number or "",
+            "description": entry.description or "",
+        }
+
+        if collection_type == "APPLICATION":
+            base_rule.update(
+                {
+                    "protocols": protocols,
+                    "source_ip_addresses": source_addresses,
+                    "source_ip_groups": source_ip_groups,
+                    "destination_fqdns": destination_fqdns,
+                    "destination_addresses": destination_addresses,
+                }
+            )
+        elif collection_type == "NETWORK":
+            base_rule.update(
+                {
+                    "protocols": protocols,
+                    "source_ip_addresses": source_addresses,
+                    "source_ip_groups": source_ip_groups,
+                    "destination_ip_addresses": destination_ip_addresses,
+                    "destination_ip_groups": destination_ip_groups,
+                    "destination_ports": destination_ports,
+                    "destination_fqdns": destination_fqdns,
+                }
+            )
+        else:  # NAT
+            translated_port = (
+                int(entry.translated_port)
+                if entry.translated_port and str(entry.translated_port).isdigit()
+                else entry.translated_port
+            )
+            base_rule.update(
+                {
+                    "protocols": protocols,
+                    "source_ip_addresses": source_addresses,
+                    "source_ip_groups": source_ip_groups,
+                    "destination_address": entry.destination_address,
+                    "destination_ports": destination_ports,
+                    "translated_address": entry.translated_address,
+                    "translated_port": translated_port,
+                }
+            )
+
+        return base_rule
+
+    def _collection_key(self, collection_type: str) -> str:
+        return {
+            "APPLICATION": "application_rules",
+            "NETWORK": "network_rules",
+            "NAT": "nat_rules",
+        }.get(collection_type, collection_type.lower())
+
+    def _build_collection_document(
+        self, request: FirewallRequest
+    ) -> Dict[str, Dict[str, object]]:
+        ip_groups = json.loads(request.ip_groups) if request.ip_groups else {}
+        document: Dict[str, Dict[str, object]] = {
+            request.collection_name: {
+                "application_name": request.collection_name,
+                "ip_groups": ip_groups,
+                "rules": {},
+            }
+        }
+
+        rules_section = cast(
+            Dict[str, object], document[request.collection_name]["rules"]
+        )
+
+        for collection in request.rule_collections:
+            key = self._collection_key(collection.collection_type)
+            formatted_rules = [
+                self._format_rule_for_document(collection.collection_type, entry)
+                for entry in collection.rule_entries
+            ]
+            if not formatted_rules:
+                continue
+            rules_section[key] = {
+                "priority": collection.priority,
+                "action": collection.action,
+                "rules": formatted_rules,
+            }
+
+        return document
 
     @staticmethod
-    def _build_duplicate_key(rule: FirewallRuleEntryInput) -> str:
-        key_components = [
-            rule.source.lower(),
-            rule.destination.lower(),
-            "|".join(FirewallRequestService._normalise_ports(rule.ports)),
-            rule.protocol.upper(),
-            rule.direction.upper(),
-        ]
+    def _build_duplicate_key(
+        collection_type: str,
+        rule: Union[ApplicationRuleInput, NetworkRuleInput, NatRuleInput],
+    ) -> str:
+        if collection_type == "APPLICATION":
+            typed_rule = cast(ApplicationRuleInput, rule)
+            protocol_tokens = "|".join(
+                f"{proto.type}:{proto.port}"
+                for proto in sorted(
+                    typed_rule.protocols, key=lambda p: (p.type, p.port)
+                )
+            )
+            key_components = [
+                collection_type,
+                typed_rule.name.lower(),
+                protocol_tokens,
+                "|".join(sorted(typed_rule.source_ip_addresses)),
+                "|".join(
+                    sorted(
+                        typed_rule.destination_fqdns + typed_rule.destination_addresses
+                    )
+                ),
+                "|".join(sorted(typed_rule.source_ip_groups)),
+            ]
+        elif collection_type == "NETWORK":
+            typed_rule = cast(NetworkRuleInput, rule)
+            key_components = [
+                collection_type,
+                typed_rule.name.lower(),
+                "|".join(sorted(typed_rule.protocols)),
+                "|".join(sorted(typed_rule.source_ip_addresses)),
+                "|".join(sorted(typed_rule.source_ip_groups)),
+                "|".join(sorted(typed_rule.destination_ip_addresses)),
+                "|".join(sorted(typed_rule.destination_ip_groups)),
+                "|".join(sorted(typed_rule.destination_ports)),
+                "|".join(sorted(typed_rule.destination_fqdns)),
+            ]
+        else:  # NAT
+            typed_rule = cast(NatRuleInput, rule)
+            key_components = [
+                collection_type,
+                typed_rule.name.lower(),
+                "|".join(sorted(typed_rule.protocols)),
+                "|".join(sorted(typed_rule.source_ip_addresses)),
+                "|".join(sorted(typed_rule.source_ip_groups)),
+                typed_rule.destination_address.lower(),
+                "|".join(sorted(typed_rule.destination_ports)),
+                typed_rule.translated_address.lower(),
+                str(typed_rule.translated_port),
+            ]
+
         dedupe_string = "::".join(key_components)
         return hashlib.sha256(dedupe_string.encode("utf-8")).hexdigest()
 

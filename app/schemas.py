@@ -3,16 +3,21 @@
 import ipaddress
 import re
 from datetime import date
-from typing import List, Optional, Set
+from typing import Dict, List, Optional, Set
+from typing import Literal
 from urllib.parse import urlparse
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 HOSTNAME_REGEX = re.compile(
     r"^(?=.{1,253}$)(?!-)[A-Za-z0-9-]{1,63}(?<!-)(\.(?!-)[A-Za-z0-9-]{1,63}(?<!-))*\.?$"
 )
 PROTOCOL_OPTIONS = {"TCP", "UDP", "ICMP", "ESP", "AH", "GRE", "ANY"}
 DIRECTION_OPTIONS = {"INBOUND", "OUTBOUND", "BIDIRECTIONAL"}
+AZURE_NAME_REGEX = re.compile(r"^[A-Za-z0-9_-]{1,80}$")
+APPLICATION_RULE_PROTOCOLS = {"HTTP", "HTTPS", "MSSQL"}
+NETWORK_RULE_PROTOCOLS = {"ANY", "TCP", "UDP", "ICMP"}
+NAT_RULE_PROTOCOLS = {"ANY", "TCP", "UDP"}
 ENVIRONMENT_SCOPE_OPTIONS = {
     "DEV",
     "TEST",
@@ -199,78 +204,304 @@ class LookupDataCreate(BaseModel):
         return v.strip().upper()
 
 
-class FirewallRuleEntryInput(BaseModel):
-    """Payload for an individual firewall rule entry."""
+def _validate_collection_name(value: str, *, field_name: str) -> str:
+    if not value or value.strip() == "":
+        raise ValueError(f"{field_name} cannot be empty")
+    cleaned = value.strip()
+    if not AZURE_NAME_REGEX.fullmatch(cleaned):
+        raise ValueError(
+            f"{field_name} must be 1-80 characters and contain only letters, numbers, underscores, or hyphens"
+        )
+    return cleaned
 
-    source: str = Field(..., min_length=1, max_length=255)
-    destination: str = Field(..., min_length=1, max_length=255)
-    ports: List[str] = Field(..., min_length=1)
-    protocol: str = Field(..., min_length=2, max_length=20)
-    direction: str = Field(..., min_length=2, max_length=20)
+
+def _normalise_address_list(
+    values: List[str], *, allow_empty: bool = False
+) -> List[str]:
+    normalised = []
+    for value in values:
+        if value is None:
+            continue
+        normalised.append(_normalise_endpoint(value))
+    if not normalised and not allow_empty:
+        raise ValueError("At least one address value is required")
+    # Preserve order but remove duplicates
+    return list(dict.fromkeys(normalised))
+
+
+def _normalise_string_list(values: List[str]) -> List[str]:
+    cleaned: List[str] = []
+    for value in values:
+        if value is None:
+            continue
+        candidate = value.strip()
+        if candidate:
+            cleaned.append(candidate)
+    return list(dict.fromkeys(cleaned))
+
+
+def _validate_priority(value: Optional[int]) -> Optional[int]:
+    if value is None:
+        return None
+    if not (100 <= value <= 65000):
+        raise ValueError("Priority must be between 100 and 65000")
+    if value % 100 != 0:
+        raise ValueError("Priority must be in increments of 100")
+    return value
+
+
+class FirewallRuleBase(BaseModel):
+    """Common attributes shared by all firewall rule types."""
+
+    name: str = Field(..., max_length=80)
+    ritm_number: Optional[str] = Field(None, max_length=64)
     description: Optional[str] = Field(None, max_length=500)
 
-    @field_validator("source")
+    @field_validator("name")
     @classmethod
-    def validate_source(cls, value: str) -> str:
-        return _normalise_endpoint(value)
+    def validate_name(cls, value: str) -> str:
+        return _validate_collection_name(value, field_name="Rule name")
 
-    @field_validator("destination")
+    @field_validator("ritm_number")
     @classmethod
-    def validate_destination(cls, value: str) -> str:
-        return _normalise_endpoint(value)
-
-    @field_validator("ports")
-    @classmethod
-    def validate_ports(cls, values: List[str]) -> List[str]:
-        return _normalise_port_values(values)
-
-    @field_validator("protocol")
-    @classmethod
-    def validate_protocol(cls, value: str) -> str:
-        candidate = value.strip().upper()
-        if candidate not in PROTOCOL_OPTIONS:
-            raise ValueError(
-                f"Protocol '{value}' is not valid. Must be one of: {', '.join(sorted(PROTOCOL_OPTIONS))}"
-            )
-        return candidate
-
-    @field_validator("direction")
-    @classmethod
-    def validate_direction(cls, value: str) -> str:
-        candidate = value.strip().upper()
-        if candidate not in DIRECTION_OPTIONS:
-            raise ValueError(
-                f"Direction '{value}' is not valid. Must be one of: {', '.join(sorted(DIRECTION_OPTIONS))}"
-            )
-        return candidate
+    def validate_ritm(cls, value: Optional[str]) -> Optional[str]:
+        return value.strip() if value else None
 
     @field_validator("description")
     @classmethod
     def validate_description(cls, value: Optional[str]) -> Optional[str]:
-        return value.strip() if value else value
+        return value.strip() if value else None
+
+
+class ApplicationRuleProtocol(BaseModel):
+    """Protocol definition for an application rule."""
+
+    port: int = Field(..., ge=1, le=65535)
+    type: str
+
+    @field_validator("type")
+    @classmethod
+    def validate_type(cls, value: str) -> str:
+        candidate = value.strip().upper()
+        if candidate not in APPLICATION_RULE_PROTOCOLS:
+            raise ValueError(
+                "Application rule protocol must be one of: "
+                + ", ".join(sorted(APPLICATION_RULE_PROTOCOLS))
+            )
+        # Azure expects specific casing, e.g. Https
+        return candidate.capitalize()
+
+
+class ApplicationRuleInput(FirewallRuleBase):
+    collection_type: Literal["APPLICATION"] = "APPLICATION"
+    protocols: List[ApplicationRuleProtocol] = Field(..., min_length=1)
+    source_ip_addresses: List[str] = Field(..., min_length=1)
+    source_ip_groups: List[str] = Field(default_factory=list)
+    destination_fqdns: List[str] = Field(default_factory=list)
+    destination_addresses: List[str] = Field(default_factory=list)
+
+    @field_validator("source_ip_addresses")
+    @classmethod
+    def validate_sources(cls, values: List[str]) -> List[str]:
+        return _normalise_address_list(values)
+
+    @field_validator("source_ip_groups")
+    @classmethod
+    def validate_group_names(cls, values: List[str]) -> List[str]:
+        names = [_validate_collection_name(v, field_name="IP group") for v in values]
+        return list(dict.fromkeys(names))
+
+    @field_validator("destination_addresses")
+    @classmethod
+    def validate_app_dest_addresses(cls, values: List[str]) -> List[str]:
+        return _normalise_address_list(values, allow_empty=True)
+
+    @field_validator("destination_fqdns")
+    @classmethod
+    def validate_dest_fqdns(cls, values: List[str]) -> List[str]:
+        return _normalise_address_list(values, allow_empty=True)
+
+
+class NetworkRuleInput(FirewallRuleBase):
+    collection_type: Literal["NETWORK"] = "NETWORK"
+    protocols: List[str] = Field(..., min_length=1)
+    source_ip_addresses: List[str] = Field(..., min_length=1)
+    source_ip_groups: List[str] = Field(default_factory=list)
+    destination_ip_addresses: List[str] = Field(..., min_length=1)
+    destination_ip_groups: List[str] = Field(default_factory=list)
+    destination_ports: List[str] = Field(..., min_length=1)
+    destination_fqdns: List[str] = Field(default_factory=list)
+
+    @field_validator("protocols")
+    @classmethod
+    def validate_protocols(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for value in values:
+            candidate = value.strip().upper()
+            if candidate not in NETWORK_RULE_PROTOCOLS:
+                raise ValueError(
+                    "Network rule protocol must be one of: "
+                    + ", ".join(sorted(NETWORK_RULE_PROTOCOLS))
+                )
+            cleaned.append(candidate)
+        return list(dict.fromkeys(cleaned))
+
+    @field_validator("source_ip_addresses", "destination_ip_addresses")
+    @classmethod
+    def validate_ip_lists(cls, values: List[str]) -> List[str]:
+        return _normalise_address_list(values)
+
+    @field_validator("source_ip_groups", "destination_ip_groups")
+    @classmethod
+    def validate_group_lists(cls, values: List[str]) -> List[str]:
+        names = [_validate_collection_name(v, field_name="IP group") for v in values]
+        return list(dict.fromkeys(names))
+
+    @field_validator("destination_ports")
+    @classmethod
+    def validate_ports(cls, values: List[str]) -> List[str]:
+        return _normalise_port_values(values)
+
+    @field_validator("destination_fqdns")
+    @classmethod
+    def validate_network_dest_fqdns(cls, values: List[str]) -> List[str]:
+        return _normalise_address_list(values, allow_empty=True)
+
+
+class NatRuleInput(FirewallRuleBase):
+    collection_type: Literal["NAT"] = "NAT"
+    protocols: List[str] = Field(..., min_length=1)
+    source_ip_addresses: List[str] = Field(..., min_length=1)
+    source_ip_groups: List[str] = Field(default_factory=list)
+    destination_address: str
+    destination_ports: List[str] = Field(..., min_length=1)
+    translated_address: str
+    translated_port: int = Field(..., ge=1, le=65535)
+
+    @field_validator("protocols")
+    @classmethod
+    def validate_nat_protocols(cls, values: List[str]) -> List[str]:
+        cleaned = []
+        for value in values:
+            candidate = value.strip().upper()
+            if candidate not in NAT_RULE_PROTOCOLS:
+                raise ValueError(
+                    "NAT rule protocol must be one of: "
+                    + ", ".join(sorted(NAT_RULE_PROTOCOLS))
+                )
+            cleaned.append(candidate)
+        return list(dict.fromkeys(cleaned))
+
+    @field_validator("source_ip_addresses")
+    @classmethod
+    def validate_nat_sources(cls, values: List[str]) -> List[str]:
+        return _normalise_address_list(values)
+
+    @field_validator("source_ip_groups")
+    @classmethod
+    def validate_nat_groups(cls, values: List[str]) -> List[str]:
+        names = [_validate_collection_name(v, field_name="IP group") for v in values]
+        return list(dict.fromkeys(names))
+
+    @field_validator("destination_address", "translated_address")
+    @classmethod
+    def validate_nat_addresses(cls, value: str) -> str:
+        return _normalise_endpoint(value)
+
+    @field_validator("destination_ports")
+    @classmethod
+    def validate_nat_ports(cls, values: List[str]) -> List[str]:
+        return _normalise_port_values(values)
+
+
+class ApplicationRuleGroupInput(BaseModel):
+    action: str
+    priority: Optional[int] = None
+    rules: List[ApplicationRuleInput] = Field(..., min_length=1)
+
+    @field_validator("action")
+    @classmethod
+    def validate_action(cls, value: str) -> str:
+        candidate = value.strip().upper()
+        if candidate not in {"ALLOW", "DENY"}:
+            raise ValueError("Application rule action must be Allow or Deny")
+        return candidate.capitalize()
+
+    @field_validator("priority")
+    @classmethod
+    def validate_priority_value(cls, value: Optional[int]) -> Optional[int]:
+        return _validate_priority(value)
+
+
+class NetworkRuleGroupInput(BaseModel):
+    action: str
+    priority: Optional[int] = None
+    rules: List[NetworkRuleInput] = Field(..., min_length=1)
+
+    @field_validator("action")
+    @classmethod
+    def validate_network_action(cls, value: str) -> str:
+        candidate = value.strip().upper()
+        if candidate not in {"ALLOW", "DENY"}:
+            raise ValueError("Network rule action must be Allow or Deny")
+        return candidate.capitalize()
+
+    @field_validator("priority")
+    @classmethod
+    def validate_network_priority(cls, value: Optional[int]) -> Optional[int]:
+        return _validate_priority(value)
+
+
+class NatRuleGroupInput(BaseModel):
+    action: str
+    priority: Optional[int] = None
+    rules: List[NatRuleInput] = Field(..., min_length=1)
+
+    @field_validator("action")
+    @classmethod
+    def validate_nat_action(cls, value: str) -> str:
+        candidate = value.strip().upper()
+        if candidate != "DNAT":
+            raise ValueError("NAT rule action must be Dnat")
+        return "Dnat"
+
+    @field_validator("priority")
+    @classmethod
+    def validate_nat_priority(cls, value: Optional[int]) -> Optional[int]:
+        return _validate_priority(value)
 
 
 class FirewallRequestCreate(BaseModel):
-    """Schema for creating a firewall request with multiple rules."""
+    """Schema for creating a firewall request with structured rule collections."""
 
-    application_name: str = Field(..., min_length=3, max_length=200)
-    organization: str = Field(..., min_length=2, max_length=100)
-    lob: str = Field(..., min_length=2, max_length=100)
-    platform: str = Field(default="Azure", max_length=50)
+    source_application_id: int = Field(..., gt=0)
+    collection_name: str = Field(..., min_length=1, max_length=80)
+    ip_groups: Dict[str, List[str]] = Field(default_factory=dict)
     environment_scopes: List[str] = Field(..., min_length=1)
     destination_service: str = Field(..., min_length=2, max_length=200)
     justification: str = Field(..., min_length=10, max_length=4000)
     requested_effective_date: Optional[date] = None
     expires_at: Optional[date] = None
     github_pr_url: Optional[str] = Field(None, max_length=500)
-    rule_entries: List[FirewallRuleEntryInput] = Field(..., min_length=1)
+    application_rules: Optional[ApplicationRuleGroupInput] = None
+    network_rules: Optional[NetworkRuleGroupInput] = None
+    nat_rules: Optional[NatRuleGroupInput] = None
 
-    @field_validator("application_name", "organization", "lob")
+    @field_validator("collection_name")
     @classmethod
-    def validate_common_strings(cls, value: str) -> str:
-        if not value or value.strip() == "":
-            raise ValueError("This field cannot be empty")
-        return value.strip()
+    def validate_collection_name(cls, value: str) -> str:
+        return _validate_collection_name(value, field_name="Collection name")
+
+    @field_validator("ip_groups")
+    @classmethod
+    def validate_ip_groups(cls, value: Dict[str, List[str]]) -> Dict[str, List[str]]:
+        cleaned: Dict[str, List[str]] = {}
+        for group_name, members in value.items():
+            cleaned_name = _validate_collection_name(
+                group_name, field_name="IP group name"
+            )
+            cleaned[cleaned_name] = _normalise_string_list(members)
+        return cleaned
 
     @field_validator("environment_scopes")
     @classmethod
@@ -316,3 +547,11 @@ class FirewallRequestCreate(BaseModel):
         if expires and requested and expires < requested:
             raise ValueError("Expiry date cannot be earlier than the effective date")
         return expires
+
+    @model_validator(mode="after")
+    def ensure_rule_group_present(self):
+        if not any([self.application_rules, self.network_rules, self.nat_rules]):
+            raise ValueError(
+                "At least one rule group (application, network, or NAT) is required"
+            )
+        return self

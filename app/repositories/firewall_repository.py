@@ -63,3 +63,26 @@ class FirewallRequestRepository(BaseRepository[FirewallRequest]):
     def list_all(self) -> List[FirewallRequest]:
         """List all firewall requests ordered by creation date."""
         return self.query().order_by(FirewallRequest.created_at.desc()).all()
+
+    def get_max_priority_for_source(
+        self, source_application_id: int, collection_type: str
+    ) -> int | None:
+        """
+        Retrieve the maximum priority for a specific collection type
+        within the given source application's rule collections.
+        """
+        from app.models import FirewallRuleCollection
+
+        result = (
+            self.db.session.query(FirewallRuleCollection.priority)
+            .join(
+                FirewallRequest,
+                FirewallRuleCollection.firewall_request_id == FirewallRequest.id,
+            )
+            .filter(FirewallRequest.source_application_id == source_application_id)
+            .filter(FirewallRuleCollection.collection_type == collection_type)
+            .order_by(FirewallRuleCollection.priority.desc())
+            .first()
+        )
+
+        return result[0] if result else None
