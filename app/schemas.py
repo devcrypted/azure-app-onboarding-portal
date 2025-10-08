@@ -3,7 +3,7 @@
 import ipaddress
 import re
 from datetime import date
-from typing import Dict, List, Optional, Set
+from typing import Dict, List, Optional, Set, Union
 from typing import Literal
 from urllib.parse import urlparse
 
@@ -474,11 +474,12 @@ class NatRuleGroupInput(BaseModel):
 class FirewallRequestCreate(BaseModel):
     """Schema for creating a firewall request with structured rule collections."""
 
-    source_application_id: int = Field(..., gt=0)
+    source_application_id: Union[int, str] = Field(
+        ..., description="Application ID (numeric), app code, or slug"
+    )
     collection_name: str = Field(..., min_length=1, max_length=80)
     ip_groups: Dict[str, List[str]] = Field(default_factory=dict)
     environment_scopes: List[str] = Field(..., min_length=1)
-    destination_service: str = Field(..., min_length=2, max_length=200)
     justification: str = Field(..., min_length=10, max_length=4000)
     requested_effective_date: Optional[date] = None
     expires_at: Optional[date] = None
@@ -517,13 +518,6 @@ class FirewallRequestCreate(BaseModel):
                 "Invalid environment scope(s): " + ", ".join(sorted(invalid))
             )
         return sorted(normalised)
-
-    @field_validator("destination_service")
-    @classmethod
-    def validate_destination_service(cls, value: str) -> str:
-        if not value or value.strip() == "":
-            raise ValueError("Destination service cannot be empty")
-        return value.strip()
 
     @field_validator("justification")
     @classmethod

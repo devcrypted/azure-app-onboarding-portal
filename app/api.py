@@ -10,7 +10,7 @@ from typing import Any, Dict
 from flask import Blueprint, jsonify, request
 from pydantic import ValidationError
 
-from app.models import RequestStatus, RequestType, WorkflowStage, db
+from app.models import Application, RequestStatus, RequestType, WorkflowStage, db
 from app.repositories import AuditRepository
 from app.schemas import (
     ApprovalRequest,
@@ -178,12 +178,12 @@ def get_requests():
     return jsonify({"requests": [app.to_dict() for app in applications]})
 
 
-@api_bp.route("/requests/<int:request_id>", methods=["GET"])
-def get_request(request_id: int):
+@api_bp.route("/requests/<request_id>", methods=["GET"])
+def get_request(request_id: str):
     """Get specific onboarding request with audit logs.
 
     Args:
-        request_id: Application ID
+        request_id: Application ID (numeric), app_code (APP-00001), or app_slug
 
     Returns:
         JSON application details with audit logs
@@ -191,20 +191,39 @@ def get_request(request_id: int):
     user_email = get_current_user_email()
     services = get_services()
 
-    application = services["app"].get_application(request_id)
+    # Try to find by ID first (if numeric), then by app_code, then by app_slug
+    application = None
+    if request_id.isdigit():
+        application = services["app"].get_application(int(request_id))
+
+    if not application:
+        # Try to find by app_code or app_slug
+        application = (
+            db.session.query(Application)
+            .filter(
+                (Application.app_code == request_id)
+                | (Application.app_slug == request_id)
+            )
+            .first()
+        )
+
     if not application:
         return jsonify({"error": "Application not found"}), 404
 
-    # Check authorization
-    if (
-        not services["auth"].is_admin(user_email)
-        and application.requested_by != user_email
-    ):
+    # Check authorization - allow access for approved applications (for firewall requests)
+    # or if user is admin or requester
+    is_authorized = (
+        services["auth"].is_admin(user_email)
+        or application.requested_by == user_email
+        or application.status == RequestStatus.APPROVED
+    )
+
+    if not is_authorized:
         return jsonify({"error": "Unauthorized"}), 403
 
     # Get audit logs
     audit_repo = AuditRepository(db)
-    audit_logs = audit_repo.get_by_app_id(request_id)
+    audit_logs = audit_repo.get_by_app_id(application.id)
 
     # Build response
     result = application.to_dict()
@@ -301,7 +320,31 @@ def create_firewall_request():
         )
 
     except ValidationError as e:
-        return jsonify({"error": "Validation failed", "details": e.errors()}), 400
+        # Convert Pydantic validation errors to JSON-serializable format
+        errors = []
+        for error in e.errors():
+            error_dict = {
+                "loc": error.get("loc", []),
+                "msg": error.get("msg", "Validation error"),
+                "type": error.get("type", "value_error"),
+            }
+            # Include input value if it's serializable
+            if "input" in error:
+                try:
+                    import json
+
+                    json.dumps(error["input"])  # Test if serializable
+                    error_dict["input"] = error["input"]
+                except (TypeError, ValueError):
+                    error_dict["input"] = str(error["input"])
+
+            # Handle context if present
+            if "ctx" in error:
+                error_dict["ctx"] = {k: str(v) for k, v in error["ctx"].items()}
+
+            errors.append(error_dict)
+
+        return jsonify({"error": "Validation failed", "details": errors}), 400
     except DuplicateFirewallRuleError as e:
         return jsonify({"error": str(e), "duplicates": e.duplicates}), 409
     except ValueError as e:

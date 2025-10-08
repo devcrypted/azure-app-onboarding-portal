@@ -98,21 +98,61 @@ class FirewallRequestService:
             ]
             raise DuplicateFirewallRuleError(duplicate_payload)
 
-        source_application = self.application_service.get_application(
-            payload.source_application_id
-        )
+        # Resolve application ID (supports numeric ID, app_code, or app_slug)
+        source_application = None
+        app_id_str = str(payload.source_application_id)
+
+        if app_id_str.isdigit():
+            source_application = self.application_service.get_application(
+                int(app_id_str)
+            )
+
+        if not source_application:
+            # Try to find by app_code or app_slug
+            from app.models import Application
+
+            source_application = (
+                self.db.session.query(Application)
+                .filter(
+                    (Application.app_code == app_id_str)
+                    | (Application.app_slug == app_id_str)
+                )
+                .first()
+            )
+
         if not source_application:
             raise ValueError(
-                f"Application {payload.source_application_id} not found for firewall request"
+                f"Application '{payload.source_application_id}' not found. Please provide a valid ID, app code, or slug."
             )
         if source_application.request_type != RequestType.ONBOARDING:
             raise ValueError("Firewall requests must target an onboarding application")
 
+        # Map abbreviated environment codes to full names
+        env_code_to_name = {
+            "DEV": "DEVELOPMENT",
+            "TEST": "TESTING",
+            "QA": "QA",
+            "STAGE": "STAGING",
+            "UAT": "UAT",
+            "PROD": "PRODUCTION",
+            "DR": "DR",
+        }
+
+        # Get available environment names from the application
         available_scopes = {
             env.environment_name.strip().upper()
             for env in source_application.environments
         }
-        invalid_scopes = set(payload.environment_scopes) - available_scopes
+
+        # Convert incoming environment scopes (which may be abbreviated) to full names
+        normalized_scopes = set()
+        for scope in payload.environment_scopes:
+            scope_upper = scope.strip().upper()
+            # Try to map abbreviated code to full name, otherwise use as-is
+            full_name = env_code_to_name.get(scope_upper, scope_upper)
+            normalized_scopes.add(full_name)
+
+        invalid_scopes = normalized_scopes - available_scopes
         if invalid_scopes:
             raise ValueError(
                 "Environment scopes must match the application's environments; "
@@ -140,7 +180,7 @@ class FirewallRequestService:
             collection_name=payload.collection_name,
             ip_groups=json.dumps(payload.ip_groups or {}),
             environment_scopes=json.dumps(payload.environment_scopes),
-            destination_service=payload.destination_service,
+            destination_service=getattr(payload, "destination_service", None),
             justification=payload.justification,
             requested_effective_date=payload.requested_effective_date,
             expires_at=payload.expires_at,

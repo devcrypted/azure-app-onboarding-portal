@@ -323,7 +323,7 @@ class FirewallRequest(db.Model):
     environment_scopes = db.Column(
         db.Text, nullable=False
     )  # JSON array of requested environment scopes
-    destination_service = db.Column(db.String(200), nullable=False)
+    destination_service = db.Column(db.String(200), nullable=True)
     justification = db.Column(db.Text, nullable=False)
     requested_effective_date = db.Column(db.Date, nullable=True)
     expires_at = db.Column(db.Date, nullable=True)
@@ -346,7 +346,7 @@ class FirewallRequest(db.Model):
     application = db.relationship(
         "Application",
         foreign_keys=[app_id],
-        backref="firewall_details",
+        backref=db.backref("firewall_details", uselist=False),
         uselist=False,
     )
     source_application = db.relationship(
